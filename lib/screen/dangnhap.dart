@@ -132,62 +132,171 @@ class _DangNhapScreenState extends State<DangNhapScreen> {
     );
   }
 
+  // @override
+  // Widget build(BuildContext context) {
+  //   return Scaffold(
+  //     appBar: AppBar(
+  //       title: const SizedBox.shrink(),
+  //       centerTitle: true,
+  //       backgroundColor: Colors.blue,
+  //     ),
+  //     body: SingleChildScrollView(
+  //       child: Padding(
+  //         padding: const EdgeInsets.all(16.0),
+  //         child: Column(
+  //           crossAxisAlignment: CrossAxisAlignment.start,
+  //           children: [
+  //             Center(
+  //               child: Image.asset('assets/images/icon_app.png', height: 200),
+  //             ),
+  //             const SizedBox(height: 20),
+  //             TextField(
+  //               controller: _emailOrUsernameController,
+  //               decoration: InputDecoration(labelText: 'Email hoặc Username'),
+  //             ),
+  //             const SizedBox(height: 10),
+  //             TextField(
+  //               controller: _passwordController,
+  //               obscureText: true,
+  //               decoration: InputDecoration(labelText: 'Mật khẩu'),
+  //             ),
+  //             const SizedBox(height: 8),
+  //             Column(
+  //               crossAxisAlignment: CrossAxisAlignment.start,
+  //               children: [
+  //                 Row(
+  //                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
+  //                   children: [
+  //                     TextButton(
+  //                       onPressed: _showResetPasswordDialog,
+  //                       child: const Text('Quên mật khẩu?'),
+  //                     ),
+  //                     ElevatedButton(
+  //                       onPressed: _dangNhap,
+  //                       child: const Text('Đăng Nhập'),
+  //                     ),
+  //                   ],
+  //                 ),
+  //                 const SizedBox(height: 10),
+  //                 Row(
+  //                   mainAxisAlignment: MainAxisAlignment.center,
+  //                   children: [
+  //                     TextButton(
+  //                       onPressed: () {
+  //                         Navigator.pushNamed(context, '/dangky');
+  //                       },
+  //                       child: const Text('Bạn là người mới?'),
+  //                     ),
+  //                   ],
+  //                 ),
+  //               ],
+  //             ),
+  //           ],
+  //         ),
+  //       ),
+  //     ),
+  //   );
+  // }
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      extendBodyBehindAppBar: true,
       appBar: AppBar(
-        title: const SizedBox.shrink(),
-        centerTitle: true,
-        backgroundColor: Colors.blue,
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        iconTheme: const IconThemeData(color: Colors.black),
       ),
-      body: SingleChildScrollView(
-        child: Padding(
-          padding: const EdgeInsets.all(16.0),
+      body: Container(
+        width: double.infinity,
+        height: double.infinity,
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Color(0xFFB2EBF2), Colors.white],
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+          ),
+        ),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 100, 20, 20),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Center(
-                child: Image.asset('assets/images/icon_app.png', height: 200),
+              // LOGO BO TRÒN
+              CircleAvatar(
+                radius: 60,
+                backgroundColor: Colors.white,
+                backgroundImage: AssetImage('assets/images/icon_app.png'),
               ),
               const SizedBox(height: 20),
+
+              // TIÊU ĐỀ
+              const Text(
+                'Đăng Nhập',
+                style: TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.blueAccent,
+                ),
+              ),
+              const SizedBox(height: 30),
+
+              // EMAIL OR USERNAME
               TextField(
                 controller: _emailOrUsernameController,
-                decoration: InputDecoration(labelText: 'Email hoặc Username'),
+                decoration: const InputDecoration(
+                  labelText: 'Email hoặc Username',
+                  prefixIcon: Icon(Icons.person),
+                  border: OutlineInputBorder(),
+                ),
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 20),
+
+              // PASSWORD
               TextField(
                 controller: _passwordController,
                 obscureText: true,
-                decoration: InputDecoration(labelText: 'Mật khẩu'),
+                decoration: const InputDecoration(
+                  labelText: 'Mật khẩu',
+                  prefixIcon: Icon(Icons.lock),
+                  border: OutlineInputBorder(),
+                ),
               ),
-              const SizedBox(height: 8),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      TextButton(
-                        onPressed: _showResetPasswordDialog,
-                        child: const Text('Quên mật khẩu?'),
-                      ),
-                      ElevatedButton(
-                        onPressed: _dangNhap,
-                        child: const Text('Đăng Nhập'),
-                      ),
-                    ],
+              const SizedBox(height: 10),
+
+              // QUÊN MẬT KHẨU
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  onPressed: _showResetPasswordDialog,
+                  child: const Text('Quên mật khẩu?'),
+                ),
+              ),
+              const SizedBox(height: 10),
+
+              // NÚT ĐĂNG NHẬP
+              ElevatedButton(
+                onPressed: _dangNhap,
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 15),
+                  backgroundColor: Colors.blue,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(30),
                   ),
-                  const SizedBox(height: 10),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      TextButton(
-                        onPressed: () {
-                          Navigator.pushNamed(context, '/dangky');
-                        },
-                        child: const Text('Bạn là người mới?'),
-                      ),
-                    ],
+                ),
+                child: const Text('Đăng Nhập', style: TextStyle(fontSize: 16)),
+              ),
+              const SizedBox(height: 20),
+
+              // ĐĂNG KÝ
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Text("Chưa có tài khoản?"),
+                  TextButton(
+                    onPressed: () {
+                      Navigator.pushNamed(context, '/dangky');
+                    },
+                    child: const Text('Đăng ký ngay'),
                   ),
                 ],
               ),
@@ -197,4 +306,5 @@ class _DangNhapScreenState extends State<DangNhapScreen> {
       ),
     );
   }
+
 }
