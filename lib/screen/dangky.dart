@@ -203,6 +203,4 @@ class _DangKyScreenState extends State<DangKyScreen> {
       ),
     );
   }
-
-
 }
