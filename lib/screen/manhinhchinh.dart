@@ -1,5 +1,7 @@
-import 'dart:math';
+// ignore_for_file: unused_field
+
 import 'dart:async';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_svg/flutter_svg.dart';
@@ -15,62 +17,61 @@ class ManHinhChinhScreen extends StatefulWidget {
 
 class _ManHinhChinhScreenState extends State<ManHinhChinhScreen>
     with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
+  late final AnimationController _controller;
+  late final DatabaseReference _languageRef;
+  late final DatabaseReference _noteRef;
+  late final TextEditingController _noteController;
+  late final StreamSubscription _languageSub;
+  late final StreamSubscription _noteSub;
+
   double _angle = 0;
-  final DatabaseReference _dataRef = FirebaseDatabase.instance.ref("What is the Language/Language");
-  final DatabaseReference _noteRef = FirebaseDatabase.instance.ref("What is the Language/Content");
-  final TextEditingController _noteController = TextEditingController();
+  String? _ngonNguHienTai;
+  String? _noiDungGhiChu;
+  bool _dangChoDuLieu = true;
 
-  String? _noiDung;
-  String? _ghiChu;
-  bool _waiting = true;
-
-  late StreamSubscription<DatabaseEvent> _dataSubscription;
-  late StreamSubscription<DatabaseEvent> _noteSubscription;
+  static const int _maxNoteLength = 10000;
 
   @override
   void initState() {
     super.initState();
+    _noteController = TextEditingController();
+    _languageRef = FirebaseDatabase.instance.ref("Results/language");
+    _noteRef = FirebaseDatabase.instance.ref("Results/text");
 
-    // Animation Controller
     _controller = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 2),
     )..repeat();
 
-    _controller.addListener(() {
-      setState(() {
-        _angle = _controller.value * 2 * pi;
-      });
-    });
-
-    // Firebase listener
-    _dataSubscription = _dataRef.onValue.listen((event) {
-      final data = event.snapshot.value;
-      if (data != null && data.toString().isNotEmpty) {
+    _languageSub = _languageRef.onValue.listen((event) {
+      final data = event.snapshot.value?.toString();
+      if (data?.isNotEmpty ?? false) {
         setState(() {
-          _noiDung = data.toString();
-          _waiting = false;
+          _ngonNguHienTai = _mapLanguage(data!);
+          _dangChoDuLieu = false;
         });
       }
     });
 
-    _noteSubscription = _noteRef.onValue.listen((event) {
-      final data = event.snapshot.value;
-      if (data != null && data.toString().isNotEmpty) {
+    _noteSub = _noteRef.onValue.listen((event) {
+      final data = event.snapshot.value?.toString();
+      if (data?.isNotEmpty ?? false) {
+        final newEntry = "$data\n";
+        final current = _noteController.text;
+        final updatedText = (newEntry + current);
+        _noiDungGhiChu = updatedText.length > _maxNoteLength
+            ? updatedText.substring(0, _maxNoteLength)
+            : updatedText;
+
         setState(() {
-          _ghiChu = data.toString();
-          _noteController.text = _ghiChu!;
+          _noteController.text = _noiDungGhiChu!;
         });
       }
     });
 
-    // Timeout nếu đợi quá lâu
     Future.delayed(const Duration(seconds: 5), () {
-      if (_noiDung == null) {
-        setState(() {
-          _waiting = true;
-        });
+      if (_ngonNguHienTai == null) {
+        setState(() => _dangChoDuLieu = true);
       }
     });
   }
@@ -78,88 +79,168 @@ class _ManHinhChinhScreenState extends State<ManHinhChinhScreen>
   @override
   void dispose() {
     _controller.dispose();
-    _dataSubscription.cancel();
-    _noteSubscription.cancel();
+    _languageSub.cancel();
+    _noteSub.cancel();
+    _noteController.dispose();
     super.dispose();
   }
 
   String getCountryCode(String language) {
     final lower = language.toLowerCase().trim();
-    final Map<String, String> languageMap = {
-      //Tiếng việtviệt
-      'vietnamese': 'vn',
-      'vi': 'vn',
-      'vietnam': 'vn',
-      'tiếng việt': 'vn',
-      //Tiếng anh mỹ
-      'english': 'us',
-      'us': 'us',
-      'tiếng anh mỹ': 'us',
-      //Tiếng anh anh
-      'british': 'gb',
-      'england': 'gb',
-      'uk': 'gb',
-      'great britain': 'gb',
-      'tiếng anh anh': 'gb',
-      //Tiếng nhật 
-      'japanese': 'jp',
-      'jp': 'jp',
-      'nihongo': 'jp',
-      'tiếng nhật': 'jp',
-      //Tiếng hàn 
-      'korean': 'kr',
-      'kr': 'kr',
-      'hangul': 'kr',
-      'tiếng hàn': 'kr',
-      //Tiếng pháp 
-      'french': 'fr',
-      'fr': 'fr',
-      'français': 'fr',
-      'tiếng pháp': 'fr',
-      //Tiếng đức 
-      'german': 'de',
-      'de': 'de',
-      'deutsch': 'de',
-      'tiếng đức': 'de',
-      //Tiếng trung 
-      'chinese': 'cn',
-      'cn': 'cn',
-      'zh': 'cn',
-      'mandarin': 'cn',
-      'tiếng trung': 'cn',
-      //Tiếng tây ban nha 
-      'spanish': 'es',
-      'es': 'es',
-      'español': 'es',
-      'tiếng tây ban nha': 'es',
-      //Tiếng thái 
-      'thai': 'th',
-      'th': 'th',
-      'tiếng thái': 'th',
+    const languageMap = {
+      'vi': 'vn', 'vietnam': 'vn', 'tiếng việt': 'vn', 'vn': 'vn',
+      'english': 'us', 'us': 'us', 'tiếng anh mỹ': 'us', 
+      'british': 'gb', 'england': 'gb', 'uk': 'gb', 'great britain': 'gb', 'tiếng anh anh': 'gb',
+      'japanese': 'jp', 'jp': 'jp', 'nihongo': 'jp', 'tiếng nhật': 'jp',
+      'korean': 'kr', 'kr': 'kr', 'hangul': 'kr', 'tiếng hàn': 'kr',
+      'french': 'fr', 'fr': 'fr', 'français': 'fr', 'tiếng pháp': 'fr',
+      'german': 'de', 'de': 'de', 'deutsch': 'de', 'tiếng đức': 'de',
+      'chinese': 'cn', 'cn': 'cn', 'zh': 'cn', 'mandarin': 'cn', 'tiếng trung': 'cn',
+      'spanish': 'es', 'es': 'es', 'español': 'es', 'tiếng tây ban nha': 'es',
+      'thai': 'th', 'th': 'th', 'tiếng thái': 'th',
     };
-    return languageMap[lower] ?? 'white';
+    return languageMap[lower] ?? 'vn';
   }
 
-  Widget _buildEditableNoteField() {
+  String _mapLanguage(String language) {
+    const languageMap = {
+      'vi': 'Tiếng Việt',
+      'us': 'Tiếng Anh Mỹ',
+      'gb': 'Tiếng Anh Anh',
+      'en': 'Tiếng Anh',
+      'jp': 'Tiếng Nhật',
+      'kr': 'Tiếng Hàn',
+      'fr': 'Tiếng Pháp',
+      'de': 'Tiếng Đức',
+      'cn': 'Tiếng Trung',
+      'es': 'Tiếng Tây Ban Nha',
+      'th': 'Tiếng Thái',
+    };
+    return languageMap[language.toLowerCase().trim()] ?? 'Không xác định';
+  }
+
+  Widget _buildLanguageCard(double width, String countryCode) {
+    return Container(
+      width: width,
+      padding: const EdgeInsets.all(16),
+      decoration: _boxDecoration(),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          SizedBox(
+            width: 40,
+            height: 40,
+            child: AnimatedBuilder(
+              animation: _controller,
+              builder: (_, __) {
+                _angle = _controller.value * 2 * pi;
+                return CustomPaint(
+                  painter: WavePainter(_angle),
+                  child: Center(
+                    child: SvgPicture.asset(
+                      'packages/country_icons/icons/flags/svg/$countryCode.svg',
+                      width: 24,
+                      height: 24,
+                      fit: BoxFit.contain,
+                      placeholderBuilder: (_) => const Icon(Icons.flag),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              _ngonNguHienTai!,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w500),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildWaitingCard(double width) {
+    return Container(
+      width: width,
+      padding: const EdgeInsets.all(16),
+      decoration: _boxDecoration(),
+      child: const Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          CircularProgressIndicator(),
+          SizedBox(height: 12),
+          Text("⏳ Đang chờ dữ liệu từ server...", style: TextStyle(fontSize: 20, color: Colors.grey)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTextContentDisplay(double width) {
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 400),
+      child: _dangChoDuLieu
+          ? _buildWaitingCard(width)
+          : (_ngonNguHienTai != null
+              ? _buildLanguageCard(width, getCountryCode(_ngonNguHienTai!))
+              : const Center(child: Text("Không có dữ liệu.", style: TextStyle(color: Colors.red)))),
+    );
+  }
+
+  Widget _buildContentField(double height) {
     return Container(
       margin: const EdgeInsets.only(top: 10),
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.9),
-        borderRadius: BorderRadius.circular(2),
-        boxShadow: const [
-          BoxShadow(color: Colors.black26, blurRadius: 6, offset: Offset(2, 3)),
-        ],
-      ),
+      height: height * 0.75,
+      decoration: _boxDecoration(),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          TextField(
-            controller: _noteController,
-            maxLines: 5,
-            maxLength: 2000000,
-            decoration: InputDecoration(
-              border: OutlineInputBorder(),
+          Row(
+            children: [
+              const Text("📝 Nội dung", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              const Spacer(),
+              IconButton(
+                icon: const Icon(Icons.clear, color: Colors.red),
+                tooltip: "Xoá toàn bộ ghi chú",
+                onPressed: () async {
+                  final confirm = await showDialog<bool>(
+                    context: context,
+                    builder: (context) => AlertDialog(
+                      title: const Text("Xác nhận xoá"),
+                      content: const Text("Bạn có chắc muốn xoá toàn bộ nội dung ghi chú không?"),
+                      actions: [
+                        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("Huỷ")),
+                        TextButton(onPressed: () => Navigator.pop(context, true), child: const Text("Xoá", style: TextStyle(color: Colors.red))),
+                      ],
+                    ),
+                  );
+                  if (confirm == true) {
+                    setState(() {
+                      _noteController.clear();
+                      _noiDungGhiChu = "";
+                    });
+                  }
+                },
+              ),
+            ],
+          ),
+          const SizedBox(height: 2),
+          Expanded(
+            child: TextField(
+              controller: _noteController,
+              expands: true,
+              maxLines: null,
+              minLines: null,
+              readOnly: true,
+              maxLength: _maxNoteLength,
+              textAlignVertical: TextAlignVertical.top,
+              decoration: const InputDecoration(
+                border: OutlineInputBorder(),
+                contentPadding: EdgeInsets.only(top: 0, left: 8, right: 8),
+              ),
             ),
           ),
         ],
@@ -167,105 +248,19 @@ class _ManHinhChinhScreenState extends State<ManHinhChinhScreen>
     );
   }
 
-  Widget _buildTextContentDisplay() {
-    final screenWidth = MediaQuery.of(context).size.width;
-
-    if (_waiting) {
-      return Container(
-        width: screenWidth,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.9),
-          borderRadius: BorderRadius.circular(2),
-          boxShadow: const [
-            BoxShadow(
-              color: Colors.black26,
-              blurRadius: 6,
-              offset: Offset(2, 3),
-            ),
-          ],
-        ),
-        child: const Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              CircularProgressIndicator(),
-              SizedBox(height: 12),
-              Text(
-                "⏳ Đang chờ dữ liệu từ server...",
-                style: TextStyle(fontSize: 20, color: Colors.grey),
-              ),
-            ],
-          ),
-        ),
+  BoxDecoration _boxDecoration() => BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        boxShadow: const [
+          BoxShadow(color: Colors.black26, blurRadius: 8, offset: Offset(2, 3)),
+        ],
       );
-    }
-
-    if (_noiDung != null) {
-      final countryCode = getCountryCode(_noiDung!);
-
-      return Container(
-        width: screenWidth,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
-        decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.9),
-          borderRadius: BorderRadius.circular(12),
-          boxShadow: const [
-            BoxShadow(
-              color: Colors.black26,
-              blurRadius: 6,
-              offset: Offset(2, 3),
-            ),
-          ],
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            SizedBox(
-              width: 40,
-              height: 40,
-              child: Stack(
-                alignment: Alignment.center,
-                children: [
-                  CustomPaint(
-                    painter: WavePainter(_angle),
-                    child: const SizedBox.expand(),
-                  ),
-                  SvgPicture.asset(
-                    'packages/country_icons/icons/flags/svg/$countryCode.svg',
-                    width: 40,
-                    height: 40,
-                    fit: BoxFit.contain,
-                    placeholderBuilder: (_) => const Icon(Icons.flag, size: 10),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 6),
-            Expanded(
-              child: Text(
-                _noiDung!,
-                style: const TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w500,
-                  color: Colors.black87,
-                ),
-                textAlign: TextAlign.center,
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-    return const Text(
-      "Không có dữ liệu.",
-      style: TextStyle(fontSize: 16, color: Colors.red),
-    );
-  }
 
   @override
   Widget build(BuildContext context) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final screenHeight = MediaQuery.of(context).size.height;
+
     return Scaffold(
       extendBodyBehindAppBar: true,
       appBar: AppBar(
@@ -277,28 +272,23 @@ class _ManHinhChinhScreenState extends State<ManHinhChinhScreen>
             icon: const Icon(Icons.exit_to_app, color: Colors.black),
             onPressed: () async {
               await FirebaseAuth.instance.signOut();
-              Navigator.pushNamedAndRemoveUntil(
-                context,
-                '/dangnhap',
-                (route) => false,
-              );
+              if (!mounted) return;
+              Navigator.pushNamedAndRemoveUntil(context, '/dangnhap', (route) => false);
             },
           ),
         ],
       ),
       body: SingleChildScrollView(
+        padding: const EdgeInsets.only(top: 70),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const SizedBox(height: 70),
             Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: _buildTextContentDisplay(),
+              padding: const EdgeInsets.all(16),
+              child: _buildTextContentDisplay(screenWidth),
             ),
-            const SizedBox(height: 10),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: _buildEditableNoteField(),
+              child: _buildContentField(screenHeight),
             ),
           ],
         ),

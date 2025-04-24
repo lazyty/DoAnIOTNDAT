@@ -1,44 +1,27 @@
 {
   "project_info": {
-    "project_number": "238376808719",
-    "firebase_url": "https://testrasp-21ca4-default-rtdb.firebaseio.com",
-    "project_id": "testrasp-21ca4",
-    "storage_bucket": "testrasp-21ca4.firebasestorage.app"
+    "project_number": "250266517848",
+    "firebase_url": "https://nhom10-project-default-rtdb.firebaseio.com",
+    "project_id": "nhom10-project",
+    "storage_bucket": "nhom10-project.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:238376808719:android:67510e44e0e22a16a30e7a",
+        "mobilesdk_app_id": "1:250266517848:android:193eba208a5f1d2767e52d",
         "android_client_info": {
           "package_name": "com.example.iotwsra"
         }
       },
-      "oauth_client": [
-        {
-          "client_id": "238376808719-grkfd94fv7e68g8h1kg6p3r063ftslhp.apps.googleusercontent.com",
-          "client_type": 3
-        }
-      ],
+      "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyBb2PEFyc1Zb_0rGf4zOhSqPssC05lZdSU"
+          "current_key": "AIzaSyBdJH3T860AK4GbDo6lF8eMG8u9Bjahsro"
         }
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": [
-            {
-              "client_id": "238376808719-grkfd94fv7e68g8h1kg6p3r063ftslhp.apps.googleusercontent.com",
-              "client_type": 3
-            },
-            {
-              "client_id": "238376808719-011curm3b2ibq7bdrgovjsqu7i65b7k5.apps.googleusercontent.com",
-              "client_type": 2,
-              "ios_info": {
-                "bundle_id": "iotwsraonios"
-              }
-            }
-          ]
+          "other_platform_oauth_client": []
         }
       }
     }
