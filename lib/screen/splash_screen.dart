@@ -17,14 +17,14 @@ class _SplashScreenState extends State<SplashScreen> {
   }
 
   Future<void> _checkLoginStatus() async {
-    await Future.delayed(Duration(seconds: 1)); // Đợi UI kịp hiển thị
+    await Future.delayed(Duration(seconds: 1));
 
     final user = FirebaseAuth.instance.currentUser;
 
     if (user != null) {
       Navigator.pushReplacementNamed(context, '/manhinhchinh');
     } else {
-      Navigator.pushReplacementNamed(context, '/dangnhap');
+      Navigator.pushReplacementNamed(context, '/login');
     }
   }
 

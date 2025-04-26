@@ -4,6 +4,8 @@ import 'screen/dangnhap.dart';
 import 'screen/dangky.dart';
 import 'screen/manhinhchinh.dart';
 import 'screen/splash_screen.dart';
+import 'screen/login.dart';       // Thêm dòng này
+import 'screen/register.dart';    // Thêm dòng này
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -19,12 +21,14 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       title: 'iotwsra',
       debugShowCheckedModeBanner: false,
-      initialRoute: '/',
+      initialRoute: '/login',
       routes: {
-        '/': (context) => const SplashScreen(),
+        //'/': (context) => const SplashScreen(),
         '/dangky': (context) => const DangKyScreen(),
         '/dangnhap': (context) => const DangNhapScreen(),
         '/manhinhchinh': (context) => const ManHinhChinhScreen(),
+        '/login': (context) => LoginScreen(),
+        '/register': (context) => RegisterScreen(),
       },
     );
   }
