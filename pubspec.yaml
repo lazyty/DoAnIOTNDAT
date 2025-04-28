@@ -44,6 +44,12 @@ dependencies:
   firebase_database: 11.3.5 
   country_icons: ^2.0.0
   flutter_svg: ^2.0.7
+  flutter_sound: ^9.0.0
+  audioplayers: ^5.2.1
+  http: ^0.13.6
+  path_provider: ^2.0.8
+  permission_handler: ^12.0.0+1
+  http_parser: ^4.1.2
 
 
 dev_dependencies:
@@ -69,7 +75,6 @@ flutter:
   uses-material-design: true
   assets:
     - assets/images/
-    - packages/country_icons/icons/flags/svg/
   # To add assets to your application, add an assets section, like this:
   # assets:
   #   - images/a_dot_burr.jpeg
