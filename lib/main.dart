@@ -1,11 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'screen/dangnhap.dart';
-import 'screen/dangky.dart';
 import 'screen/manhinhchinh.dart';
 import 'screen/splash_screen.dart';
-import 'screen/login.dart';       // Thêm dòng này
-import 'screen/register.dart';    // Thêm dòng này
+import 'screen/login.dart';       
+import 'screen/register.dart';    
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -21,11 +19,9 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       title: 'iotwsra',
       debugShowCheckedModeBanner: false,
-      initialRoute: '/login',
+      initialRoute: '/',
       routes: {
-        //'/': (context) => const SplashScreen(),
-        '/dangky': (context) => const DangKyScreen(),
-        '/dangnhap': (context) => const DangNhapScreen(),
+        '/': (context) => const SplashScreen(),
         '/manhinhchinh': (context) => const ManHinhChinhScreen(),
         '/login': (context) => LoginScreen(),
         '/register': (context) => RegisterScreen(),

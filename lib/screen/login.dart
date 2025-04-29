@@ -19,7 +19,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController _passwordController = TextEditingController();
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   bool _isLoading = false;
-  bool _isPasswordVisible = false;  // Biến kiểm tra ẩn/hiện mật khẩu
+  bool _isPasswordVisible = false;
 
   String hashPassword(String password) {
     final bytes = utf8.encode(password);
@@ -68,11 +68,19 @@ class _LoginScreenState extends State<LoginScreen> {
       final userData = snapshot.docs.first.data() as Map<String, dynamic>;
       final storedPassword = userData['Password'];
 
-      if (storedPassword == hashedPassword) {
+      // Allow login if Firestore password is a placeholder or matches the hashed password
+      if (storedPassword == 'RESET_VIA_EMAIL' || storedPassword == hashedPassword) {
         await FirebaseAuth.instance.signInWithEmailAndPassword(
           email: userData['Email'],
           password: matKhau,
         );
+
+        // If password was reset, update Firestore with the new hashed password
+        if (storedPassword == 'RESET_VIA_EMAIL') {
+          await _firestore.collection('User_Information').doc(snapshot.docs.first.id).update({
+            'Password': hashedPassword,
+          });
+        }
 
         final prefs = await SharedPreferences.getInstance();
         await prefs.setBool('isLoggedIn', true);
@@ -96,7 +104,17 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Future<void> _guiEmailResetMatKhau(String email) async {
     try {
+      // Send password reset email
       await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
+
+      // Set placeholder in Firestore to indicate password reset
+      final snapshot = await _firestore.collection('User_Information').where('Email', isEqualTo: email).get();
+      if (snapshot.docs.isNotEmpty) {
+        await snapshot.docs.first.reference.update({'Password': 'RESET_VIA_EMAIL'});
+      } else {
+        throw Exception('Không tìm thấy người dùng trong Firestore.');
+      }
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Email reset mật khẩu đã được gửi!')),
       );
@@ -109,7 +127,6 @@ class _LoginScreenState extends State<LoginScreen> {
 
   void _showResetPasswordDialog() {
     TextEditingController emailController = TextEditingController();
-
     showDialog(
       context: context,
       builder: (context) {
@@ -219,7 +236,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                         ),
                       ),
-                      obscureText: !_isPasswordVisible,  // Ẩn/hiện mật khẩu
+                      obscureText: !_isPasswordVisible,
                     ),
                   ),
                   Container(
@@ -229,7 +246,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       onTap: _showResetPasswordDialog,
                       child: Text(
                         "Forgot your password?",
-                        style: TextStyle(fontSize: 12, color: Color(0XFF2661FA)),
+                        style: TextStyle(fontSize: 12, color: Color(0xFF2661FA)),
                       ),
                     ),
                   ),
@@ -264,13 +281,13 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                           child: _isLoading
                               ? CircularProgressIndicator(
-                            color: Colors.white,
-                          )
+                                  color: Colors.white,
+                                )
                               : Text(
-                            "LOGIN",
-                            textAlign: TextAlign.center,
-                            style: TextStyle(fontWeight: FontWeight.bold),
-                          ),
+                                  "LOGIN",
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(fontWeight: FontWeight.bold),
+                                ),
                         ),
                       ),
                     ),
@@ -287,7 +304,11 @@ class _LoginScreenState extends State<LoginScreen> {
                       },
                       child: Text(
                         "Don't Have an Account? Sign up",
-                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF2661FA)),
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF2661FA),
+                        ),
                       ),
                     ),
                   ),
