@@ -158,7 +158,7 @@ class _GhiAmTabState extends State<GhiAmTab> {
     try {
       var request = http.MultipartRequest(
         'POST',
-        Uri.parse('https://your.api/upload'),
+        Uri.parse('http://34.136.208.29:8080/detect-language'),
       );
       request.files.add(await http.MultipartFile.fromPath('file', path));
       var response = await request.send();
