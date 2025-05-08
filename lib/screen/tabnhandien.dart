@@ -1,12 +1,12 @@
-import 'wave_painter.dart';
-import 'dart:async';
-import 'dart:math';
-import 'dart:io';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import 'dart:async';
 import 'package:flutter_svg/flutter_svg.dart';
-import 'package:firebase_database/firebase_database.dart';
+import 'dart:math';
+import 'package:iotwsra/screen/wave_painter.dart';
 
 class NhanDienTab extends StatefulWidget {
   const NhanDienTab({super.key});
@@ -20,13 +20,13 @@ class _NhanDienTabState extends State<NhanDienTab> with SingleTickerProviderStat
   late final DatabaseReference _languageRef;
   late final DatabaseReference _noteRef;
   late final TextEditingController _noteController;
-  late final StreamSubscription _languageSub;
-  late final StreamSubscription _noteSub;
+  StreamSubscription? _languageSub;
+  StreamSubscription? _noteSub;
 
-  double _angle = 0;
   String? _ngonNguHienTai;
   String? _noiDungGhiChu;
   bool _dangChoDuLieu = true;
+  double _angle = 0;
 
   static const int _maxNoteLength = 100000;
 
@@ -52,23 +52,13 @@ class _NhanDienTabState extends State<NhanDienTab> with SingleTickerProviderStat
       }
     });
 
-    _noteSub = _noteRef.onValue.listen((event) {
-      final data = event.snapshot.value?.toString();
-      if (data?.isNotEmpty ?? false) {
-        final newEntry = "$data\n";
-        final current = _noteController.text;
-        final updatedText = (newEntry + current);
-        _noiDungGhiChu =
-            updatedText.length > _maxNoteLength
-                ? updatedText.substring(0, _maxNoteLength)
-                : updatedText;
-
-        setState(() {
-          _noteController.text = _noiDungGhiChu!;
-        });
-      }
+    // Bước 1: Tải dữ liệu từ Firestore trước
+    _loadNotesFromFirestore().then((_) {
+      // Bước 2: Bắt đầu lắng nghe dữ liệu mới
+      _startListeningToRealtimeDatabase();
     });
 
+    // Fallback nếu sau 5s chưa có ngôn ngữ
     Future.delayed(const Duration(seconds: 5), () {
       if (_ngonNguHienTai == null) {
         setState(() => _dangChoDuLieu = true);
@@ -79,10 +69,90 @@ class _NhanDienTabState extends State<NhanDienTab> with SingleTickerProviderStat
   @override
   void dispose() {
     _controller.dispose();
-    _languageSub.cancel();
-    _noteSub.cancel();
+    _languageSub?.cancel();
+    _noteSub?.cancel();
     _noteController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadNotesFromFirestore() async {
+    final user = FirebaseAuth.instance.currentUser;
+    final email = user?.email;
+    if (email != null) {
+      try {
+        final firestore = FirebaseFirestore.instance;
+        final query = await firestore
+            .collection('User_Information')
+            .where('Email', isEqualTo: email)
+            .get();
+
+        if (query.docs.isNotEmpty) {
+          final doc = query.docs.first;
+          if (doc.exists) {
+            final displayedContent = doc['Displayed Content'] ?? '';
+            setState(() {
+              _noteController.text = displayedContent;
+              _noiDungGhiChu = displayedContent;
+            });
+          }
+        }
+      } catch (e) {
+        if (kDebugMode) print("Lỗi khi tải ghi chú từ Firestore: $e");
+      }
+    }
+  }
+
+  void _startListeningToRealtimeDatabase() {
+    _noteSub = _noteRef.onValue.listen((event) async {
+      final data = event.snapshot.value?.toString();
+      if (data?.isNotEmpty ?? false) {
+        final newEntry = "$data\n";
+        final current = _noteController.text;
+        final updatedText = newEntry + current;
+
+        _noiDungGhiChu = updatedText.length > _maxNoteLength
+            ? updatedText.substring(0, _maxNoteLength)
+            : updatedText;
+
+        // Lưu mới vào Firestore (append, không ghi đè)
+        await _appendNoteToFirestore(newEntry);
+
+        setState(() {
+          _noteController.text = _noiDungGhiChu!;
+        });
+        await _noteRef.set('');
+      }
+    });
+  }
+
+  Future<void> _appendNoteToFirestore(String newEntry) async {
+    final user = FirebaseAuth.instance.currentUser;
+    final email = user?.email;
+    if (email != null) {
+      try {
+        final firestore = FirebaseFirestore.instance;
+        final query = await firestore
+            .collection('User_Information')
+            .where('Email', isEqualTo: email)
+            .get();
+
+        if (query.docs.isNotEmpty) {
+          final doc = query.docs.first;
+          final docRef = doc.reference;
+
+          final existingContent = doc['Displayed Content'] ?? '';
+          final combined = "$newEntry$existingContent";
+
+          final clipped = combined.length > _maxNoteLength
+              ? combined.substring(0, _maxNoteLength)
+              : combined;
+
+          await docRef.set({'Displayed Content': clipped}, SetOptions(merge: true));
+        }
+      } catch (e) {
+        if (kDebugMode) print("Lỗi Firestore (append): $e");
+      }
+    }
   }
 
   String _mapLanguage(String language) {
@@ -264,6 +334,22 @@ class _NhanDienTabState extends State<NhanDienTab> with SingleTickerProviderStat
                       _noteController.clear();
                       _noiDungGhiChu = "";
                     });
+                    // Xoá luôn nội dung trên Firestore
+                    final user = FirebaseAuth.instance.currentUser;
+                    final email = user?.email;
+                    if (email != null) {
+                      final firestore = FirebaseFirestore.instance;
+
+                      final query = await firestore
+                          .collection('User_Information')
+                          .where('Email', isEqualTo: email)
+                          .get();
+
+                      if (query.docs.isNotEmpty) {
+                        final docRef = query.docs.first.reference;
+                        await docRef.update({'Displayed Content': ''}); 
+                      }
+                    }
                   }
                 },
               ),

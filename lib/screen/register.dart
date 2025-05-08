@@ -84,11 +84,26 @@ class _RegisterScreenState extends State<RegisterScreen> {
         password: password,
       );
 
+      // Lấy UID của người dùng sau khi tạo tài khoản
+      final user = FirebaseAuth.instance.currentUser;
+      final uid = user?.uid;
+
+      if (uid == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Lỗi: Không thể lấy UID người dùng.')),
+        );
+        setState(() {
+          _isLoading = false;
+        });
+        return;
+      }
+
       // Lưu thông tin người dùng vào Firestore
-      await FirebaseFirestore.instance.collection('User_Information').add({
+      await FirebaseFirestore.instance.collection('User_Information').doc(uid).set({
         'Email': email,
         'Username': username,
         'Password': hashedPassword,
+        'Displayed Content': '',
       });
 
       final prefs = await SharedPreferences.getInstance();

@@ -1,7 +1,8 @@
 // ignore_for_file: unused_field
-
 import 'dart:async';
 import 'dart:io';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:record/record.dart';
@@ -9,6 +10,9 @@ import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
+import 'package:intl/intl.dart';
+import 'package:uuid/uuid.dart';
 
 class GhiAmTab extends StatefulWidget {
   const GhiAmTab({super.key});
@@ -29,6 +33,7 @@ class _GhiAmTabState extends State<GhiAmTab> {
   String? currentlyPlayingPath;
   Timer? _timer;
   Duration _currentDuration = Duration.zero;
+  bool isUploading = false;
 
   @override
   void dispose() {
@@ -41,6 +46,18 @@ class _GhiAmTabState extends State<GhiAmTab> {
   void initState() {
     super.initState();
     loadExistingFiles();
+    player.onPlayerComplete.listen((event) {
+      if (mounted) {
+        setState(() {
+          isPlaying = false;
+          currentlyPlayingPath = null;
+        });
+      }
+    });
+  }
+
+  String sanitizeUsername(String username) {
+    return username.replaceAll(RegExp(r'[\/:*?"<>|\\]'), '_');
   }
 
   Future<void> startRecord() async {
@@ -49,10 +66,45 @@ class _GhiAmTabState extends State<GhiAmTab> {
       throw 'Chưa cấp quyền micro';
     }
 
-    final dir = await getApplicationDocumentsDirectory();
-    String timestamp = DateTime.now().millisecondsSinceEpoch.toString();
-    String filePath = '${dir.path}/audio_$timestamp.wav';
+    final user = FirebaseAuth.instance.currentUser;
+    final uid = user?.uid;
+    if (uid == null) {
+      throw 'Chưa đăng nhập';
+    }
+    if (kDebugMode) {
+      print('UID: $uid');
+    }
+    final snapshot = await FirebaseFirestore.instance.collection('User_Information').doc(uid).get();
+    if (!snapshot.exists) {
+      throw 'Dữ liệu người dùng không tồn tại.';
+    }
+    final username = snapshot.data()?['Username'];
+    
+    if (username == null || username.isEmpty) {
+      throw 'Không tìm thấy tên người dùng trong Firestore';
+    }
+    final sanitizedUsername = sanitizeUsername(username);
 
+      // Lưu file theo username
+    final dir = await getApplicationDocumentsDirectory();
+    final userDir = Directory('${dir.path}/$sanitizedUsername');
+
+    try {
+      if (!await userDir.exists()) {
+        await userDir.create(recursive: true);
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('Lỗi tạo thư mục: $e');
+      }
+      throw 'Không thể tạo thư mục lưu file ghi âm.';
+    }
+    final now = DateTime.now();
+    final formattedTime = DateFormat('yyyy-MM-dd_HH-mm-ss').format(now);
+    final filePath = '${userDir.path}/audio_$formattedTime.wav';
+    if (await record.isRecording()) {
+      await record.stop();
+    }
     await record.start(
       const RecordConfig(
         encoder: AudioEncoder.wav,
@@ -85,17 +137,18 @@ class _GhiAmTabState extends State<GhiAmTab> {
     }
 
     if (path != null) {
-      setState(() {
-        _recordedFiles.insert(0, path);
-        if (_recordedFiles.length > 10) {
-          final removed = _recordedFiles.removeLast();
-          File(removed).delete();
-        }
-        isRecording = false;
-        isPaused = false;
-        _currentDuration = Duration.zero;
-      });
-
+        if (mounted) {
+          setState(() {
+            _recordedFiles.insert(0, path);
+            if (_recordedFiles.length > 10) {
+              final removed = _recordedFiles.removeLast();
+              File(removed).delete();
+          }
+          isRecording = false;
+          isPaused = false;
+          _currentDuration = Duration.zero;
+        });
+      }
       final file = File(path);
       if (await file.exists()) {
         final size = await file.length();
@@ -107,23 +160,30 @@ class _GhiAmTabState extends State<GhiAmTab> {
           print('❌ Không tìm thấy file tại $path');
         }
       }
+      await loadExistingFiles();
     }
   }
 
   Future pauseRecord() async {
     await record.pause();
     _timer?.cancel();
-    setState(() {
-      isPaused = true;
-    });
+    if (mounted) {
+      setState(() {
+        isPaused = true;
+      });
+    }
   }
 
   Future resumeRecord() async {
     await record.resume();
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
-      setState(() {
-        _currentDuration += const Duration(seconds: 1);
-      });
+        if (mounted) {
+          setState(() {
+            _currentDuration += const Duration(seconds: 1);
+          });
+        } else {
+          _timer?.cancel(); // đảm bảo không tiếp tục gọi khi widget đã dispose
+        }
     });
     setState(() {
       isPaused = false;
@@ -144,52 +204,83 @@ class _GhiAmTabState extends State<GhiAmTab> {
         isPlaying = true;
         currentlyPlayingPath = path;
       });
-
-      player.onPlayerComplete.listen((event) {
-        setState(() {
-          isPlaying = false;
-          currentlyPlayingPath = null;
-        });
-      });
     }
   }
 
   Future uploadFile(String path) async {
+    setState(() {
+      isUploading = true;
+    });
+
     try {
       var request = http.MultipartRequest(
         'POST',
-        Uri.parse('http://34.136.208.29:8080/detect-language'),
+        Uri.parse('http://34.136.208.29:8080/detect-language/'),
       );
-      request.files.add(await http.MultipartFile.fromPath('file', path));
+      request.files.add(await http.MultipartFile.fromPath(
+        'file',
+        path,
+        contentType: MediaType('audio', 'wav'),
+      ));
       var response = await request.send();
 
+      if (kDebugMode) {
+        print('Redirect location: ${response.headers['location']}');
+      }
+
       if (response.statusCode == 200) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Upload thành công!')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Upload thành công!')),
+        );
       } else {
         throw 'Lỗi upload: ${response.statusCode}';
       }
     } catch (e) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Upload thất bại: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Upload thất bại: $e')),
+      );
+    } finally {
+      setState(() {
+        isUploading = false;
+      });
     }
   }
 
   Future<void> loadExistingFiles() async {
+    final user = FirebaseAuth.instance.currentUser;
+    final uid = user?.uid;
+    if (uid == null) {
+      if (kDebugMode) {
+        print('Người dùng chưa đăng nhập');
+      }
+      return;
+    }
+    // Lấy username từ Firestore
+    final snapshot = await FirebaseFirestore.instance.collection('User_Information').doc(uid).get();
+    final username = snapshot.data()?['Username'] ?? 'unknown';
     final dir = await getApplicationDocumentsDirectory();
-    final files = dir.listSync()
-        .whereType<File>()
-        .where((file) => file.path.endsWith('.wav'))
-        .toList();
+    final userDir = Directory('${dir.path}/$username');
 
+    if (!await userDir.exists()) {
+      if (kDebugMode) {
+        print('Thư mục người dùng không tồn tại: ${userDir.path}');
+      }
+      setState(() {
+        _recordedFiles.clear();
+      });
+      return;
+    }
+    final files = userDir.listSync()
+      .whereType<File>()
+      .where((file) => file.path.endsWith('.wav'))
+      .toList();
     files.sort((a, b) => b.statSync().modified.compareTo(a.statSync().modified));
-
+    if (!mounted) return;
     setState(() {
       _recordedFiles.clear();
       _recordedFiles.addAll(files.map((f) => f.path));
     });
+
   }
 
   Future deleteFile(String path) async {
@@ -269,8 +360,14 @@ class _GhiAmTabState extends State<GhiAmTab> {
                           onPressed: () => playAudio(path),
                         ),
                         IconButton(
-                          icon: const Icon(Icons.cloud_upload),
-                          onPressed: () => uploadFile(path),
+                          icon: isUploading
+                              ? const SizedBox(
+                                  width: 24,
+                                  height: 24,
+                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                )
+                              : const Icon(Icons.cloud_upload),
+                          onPressed: isUploading ? null : () => uploadFile(path),
                         ),
                         IconButton(
                         icon: const Icon(Icons.delete),
