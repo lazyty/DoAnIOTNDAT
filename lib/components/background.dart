@@ -36,10 +36,10 @@ class Background extends StatelessWidget {
           ),
           Positioned(
             top: 50,
-            right: 30,
+            right: 20,
             child: Image.asset(
-                "assets/images/main.png",
-                width: size.width * 0.35
+                "assets/images/iot.png",
+                width: size.width * 0.25
             ),
           ),
           Positioned(
@@ -51,11 +51,16 @@ class Background extends StatelessWidget {
             ),
           ),
           Positioned(
-            bottom: 0,
-            right: 0,
-            child: Image.asset(
-                "assets/images/bottom2.png",
-                width: size.width
+            top: 50,
+            right: 20,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(60), // Tùy chỉnh độ bo tròn
+              child: Image.asset(
+                "assets/images/img.png",
+                width: size.width * 0.30,
+                height: size.width * 0.30,
+                fit: BoxFit.cover,
+              ),
             ),
           ),
           child
