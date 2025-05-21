@@ -1,5 +1,6 @@
 // ignore_for_file: unused_field
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -15,7 +16,15 @@ import 'package:intl/intl.dart';
 import 'package:uuid/uuid.dart';
 
 class GhiAmTab extends StatefulWidget {
-  const GhiAmTab({super.key});
+  final ValueNotifier<String?> recognizedLanguage;
+  final ValueNotifier<String?> recognizedContent;
+  final VoidCallback? onUploadSuccess;
+  const GhiAmTab({
+    super.key,
+    required this.recognizedLanguage,
+    required this.recognizedContent,
+    this.onUploadSuccess,
+  });
 
   @override
   State<GhiAmTab> createState() => _GhiAmTabState();
@@ -74,18 +83,22 @@ class _GhiAmTabState extends State<GhiAmTab> {
     if (kDebugMode) {
       print('UID: $uid');
     }
-    final snapshot = await FirebaseFirestore.instance.collection('User_Information').doc(uid).get();
+    final snapshot =
+        await FirebaseFirestore.instance
+            .collection('User_Information')
+            .doc(uid)
+            .get();
     if (!snapshot.exists) {
       throw 'Dữ liệu người dùng không tồn tại.';
     }
     final username = snapshot.data()?['Username'];
-    
+
     if (username == null || username.isEmpty) {
       throw 'Không tìm thấy tên người dùng trong Firestore';
     }
     final sanitizedUsername = sanitizeUsername(username);
 
-      // Lưu file theo username
+    // Lưu file theo username
     final dir = await getApplicationDocumentsDirectory();
     final userDir = Directory('${dir.path}/$sanitizedUsername');
 
@@ -137,12 +150,12 @@ class _GhiAmTabState extends State<GhiAmTab> {
     }
 
     if (path != null) {
-        if (mounted) {
-          setState(() {
-            _recordedFiles.insert(0, path);
-            if (_recordedFiles.length > 10) {
-              final removed = _recordedFiles.removeLast();
-              File(removed).delete();
+      if (mounted) {
+        setState(() {
+          _recordedFiles.insert(0, path);
+          if (_recordedFiles.length > 10) {
+            final removed = _recordedFiles.removeLast();
+            File(removed).delete();
           }
           isRecording = false;
           isPaused = false;
@@ -177,17 +190,19 @@ class _GhiAmTabState extends State<GhiAmTab> {
   Future resumeRecord() async {
     await record.resume();
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
-        if (mounted) {
-          setState(() {
-            _currentDuration += const Duration(seconds: 1);
-          });
-        } else {
-          _timer?.cancel(); // đảm bảo không tiếp tục gọi khi widget đã dispose
-        }
+      if (mounted) {
+        setState(() {
+          _currentDuration += const Duration(seconds: 1);
+        });
+      } else {
+        _timer?.cancel(); // đảm bảo không tiếp tục gọi khi widget đã dispose
+      }
     });
-    setState(() {
-      isPaused = false;
-    });
+    if (mounted) {
+      setState(() {
+        isPaused = false;
+      });
+    }
   }
 
   Future playAudio(String path) async {
@@ -207,7 +222,7 @@ class _GhiAmTabState extends State<GhiAmTab> {
     }
   }
 
-  Future uploadFile(String path) async {
+  Future<void> uploadFile(String path) async {
     setState(() {
       isUploading = true;
     });
@@ -215,30 +230,36 @@ class _GhiAmTabState extends State<GhiAmTab> {
     try {
       var request = http.MultipartRequest(
         'POST',
-        Uri.parse('http://34.136.208.29:8080/detect-language/'),
+        Uri.parse('http://34.53.70.78:30080/detect-language/'),
       );
-      request.files.add(await http.MultipartFile.fromPath(
-        'file',
-        path,
-        contentType: MediaType('audio', 'wav'),
-      ));
+      request.files.add(
+        await http.MultipartFile.fromPath(
+          'file',
+          path,
+          contentType: MediaType('audio', 'wav'),
+        ),
+      );
       var response = await request.send();
-
-      if (kDebugMode) {
-        print('Redirect location: ${response.headers['location']}');
-      }
-
+      final responseBody = await response.stream.bytesToString();
       if (response.statusCode == 200) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Upload thành công!')),
-        );
+        final jsonData = jsonDecode(responseBody);
+          if (kDebugMode) {
+            print('Server response JSON: $jsonData');
+          }
+        widget.recognizedLanguage.value = jsonData['language'] as String?;
+        widget.recognizedContent.value = jsonData['text'] as String?;
+        widget.onUploadSuccess?.call();
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Upload thành công!')));
       } else {
         throw 'Lỗi upload: ${response.statusCode}';
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Upload thất bại: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Upload thất bại: $e')));
+      widget.recognizedLanguage.value = null; // Reset on failure
     } finally {
       setState(() {
         isUploading = false;
@@ -256,10 +277,15 @@ class _GhiAmTabState extends State<GhiAmTab> {
       return;
     }
     // Lấy username từ Firestore
-    final snapshot = await FirebaseFirestore.instance.collection('User_Information').doc(uid).get();
+    final snapshot =
+        await FirebaseFirestore.instance
+            .collection('User_Information')
+            .doc(uid)
+            .get();
     final username = snapshot.data()?['Username'] ?? 'unknown';
     final dir = await getApplicationDocumentsDirectory();
-    final userDir = Directory('${dir.path}/$username');
+    final sanitizedUsername = sanitizeUsername(username);
+    final userDir = Directory('${dir.path}/$sanitizedUsername');
 
     if (!await userDir.exists()) {
       if (kDebugMode) {
@@ -270,17 +296,20 @@ class _GhiAmTabState extends State<GhiAmTab> {
       });
       return;
     }
-    final files = userDir.listSync()
-      .whereType<File>()
-      .where((file) => file.path.endsWith('.wav'))
-      .toList();
-    files.sort((a, b) => b.statSync().modified.compareTo(a.statSync().modified));
+    final files =
+        userDir
+            .listSync()
+            .whereType<File>()
+            .where((file) => file.path.endsWith('.wav'))
+            .toList();
+    files.sort(
+      (a, b) => b.statSync().modified.compareTo(a.statSync().modified),
+    );
     if (!mounted) return;
     setState(() {
       _recordedFiles.clear();
       _recordedFiles.addAll(files.map((f) => f.path));
     });
-
   }
 
   Future deleteFile(String path) async {
@@ -360,51 +389,58 @@ class _GhiAmTabState extends State<GhiAmTab> {
                           onPressed: () => playAudio(path),
                         ),
                         IconButton(
-                          icon: isUploading
-                              ? const SizedBox(
-                                  width: 24,
-                                  height: 24,
-                                  child: CircularProgressIndicator(strokeWidth: 2),
-                                )
-                              : const Icon(Icons.cloud_upload),
-                          onPressed: isUploading ? null : () => uploadFile(path),
+                          icon:
+                              isUploading
+                                  ? const SizedBox(
+                                    width: 24,
+                                    height: 24,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                  : const Icon(Icons.cloud_upload),
+                          onPressed:
+                              isUploading ? null : () => uploadFile(path),
                         ),
                         IconButton(
-                        icon: const Icon(Icons.delete),
-                        onPressed: () async {
-                          // Nếu đang phát file, dừng phát âm thanh trước khi xóa
-                          if (isPlaying && currentlyPlayingPath == path) {
-                            await player.stop();
-                            setState(() {
-                              isPlaying = false;
-                              currentlyPlayingPath = null;
-                            });
-                          }
-                          // Xác nhận và xóa file nếu người dùng đồng ý
-                          final confirm = await showDialog(
-                            context: context,
-                            builder: (_) => AlertDialog(
-                              title: const Text('Xóa file?'),
-                              content: Text(
-                                'Bạn có chắc muốn xóa "$name"?',
-                              ),
-                              actions: [
-                                TextButton(
-                                  onPressed: () => Navigator.pop(context, false),
-                                  child: const Text('Không'),
-                                ),
-                                TextButton(
-                                  onPressed: () => Navigator.pop(context, true),
-                                  child: const Text('Xóa'),
-                                ),
-                              ],
-                            ),
-                          );
-                          if (confirm == true) {
-                            await deleteFile(path);
-                          }
-                        },
-                      )
+                          icon: const Icon(Icons.delete),
+                          onPressed: () async {
+                            // Nếu đang phát file, dừng phát âm thanh trước khi xóa
+                            if (isPlaying && currentlyPlayingPath == path) {
+                              await player.stop();
+                              setState(() {
+                                isPlaying = false;
+                                currentlyPlayingPath = null;
+                              });
+                            }
+                            // Xác nhận và xóa file nếu người dùng đồng ý
+                            final confirm = await showDialog(
+                              context: context,
+                              builder:
+                                  (_) => AlertDialog(
+                                    title: const Text('Xóa file?'),
+                                    content: Text(
+                                      'Bạn có chắc muốn xóa "$name"?',
+                                    ),
+                                    actions: [
+                                      TextButton(
+                                        onPressed:
+                                            () => Navigator.pop(context, false),
+                                        child: const Text('Không'),
+                                      ),
+                                      TextButton(
+                                        onPressed:
+                                            () => Navigator.pop(context, true),
+                                        child: const Text('Xóa'),
+                                      ),
+                                    ],
+                                  ),
+                            );
+                            if (confirm == true) {
+                              await deleteFile(path);
+                            }
+                          },
+                        ),
                       ],
                     ),
                   );

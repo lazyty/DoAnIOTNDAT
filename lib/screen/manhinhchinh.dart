@@ -5,6 +5,7 @@ import 'tabghiam.dart';
 import '../components/background.dart'; // thêm để dùng nền sáng
 
 class ManHinhChinhScreen extends StatefulWidget {
+
   const ManHinhChinhScreen({super.key});
 
   @override
@@ -13,6 +14,16 @@ class ManHinhChinhScreen extends StatefulWidget {
 
 class _ManHinhChinhScreenState extends State<ManHinhChinhScreen> {
   bool isDarkMode = false; // Mặc định chế độ tối
+  final ValueNotifier<String?> recognizedLanguage = ValueNotifier<String?>(null);
+  final ValueNotifier<String?> recognizedContent = ValueNotifier<String?>(null);
+  final GlobalKey<NhanDienTabState> _nhanDienTabKey = GlobalKey<NhanDienTabState>();
+
+  @override
+  void dispose() {
+    recognizedLanguage.dispose();
+    recognizedContent.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -67,11 +78,15 @@ class _ManHinhChinhScreenState extends State<ManHinhChinhScreen> {
             Tab(icon: Icon(Icons.mic), text: "Ghi âm"),
           ],
         ),
-        const Expanded(
+        Expanded(
           child: TabBarView(
             children: [
-              NhanDienTab(),
-              GhiAmTab(),
+              NhanDienTab(key: _nhanDienTabKey,recognizedLanguage: recognizedLanguage, recognizedContent: recognizedContent,),
+                      GhiAmTab(recognizedLanguage: recognizedLanguage, recognizedContent: recognizedContent,
+                        onUploadSuccess: () {
+                          _nhanDienTabKey.currentState?.startListeningFromUpload();
+                        },
+                      ),
             ],
           ),
         ),

@@ -104,7 +104,20 @@ class _RegisterScreenState extends State<RegisterScreen> {
         'Username': username,
         'Password': hashedPassword,
         'Displayed Content': '',
+        'CreatedAt': Timestamp.now(),
       });
+      
+      await FirebaseFirestore.instance
+        .collection('User_Information')
+        .doc(uid)
+        .collection('Content_History')
+        .add({
+          'text': 'Tài khoản đã được tạo thành công.',
+          'language': '',
+          'source': 'system',
+          'timestamp': Timestamp.now(),
+          'isUser': false,
+        });
 
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool('isLoggedIn', true);

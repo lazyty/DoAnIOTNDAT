@@ -9,26 +9,34 @@ import 'dart:math';
 import 'package:iotwsra/screen/wave_painter.dart';
 
 class NhanDienTab extends StatefulWidget {
-  const NhanDienTab({super.key});
+  final ValueNotifier<String?> recognizedLanguage;
+  final ValueNotifier<String?> recognizedContent;
+  const NhanDienTab({
+    super.key,
+    required this.recognizedLanguage,
+    required this.recognizedContent,
+  });
 
   @override
-  State<NhanDienTab> createState() => _NhanDienTabState();
+  State<NhanDienTab> createState() => NhanDienTabState();
 }
 
-class _NhanDienTabState extends State<NhanDienTab> with SingleTickerProviderStateMixin {
+class NhanDienTabState extends State<NhanDienTab>
+    with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
   late final DatabaseReference _languageRef;
   late final DatabaseReference _noteRef;
+  late final DatabaseReference _deviceRef;
   late final TextEditingController _noteController;
   StreamSubscription? _languageSub;
   StreamSubscription? _noteSub;
 
-  String? _ngonNguHienTai;
-  String? _noiDungGhiChu;
-  bool _dangChoDuLieu = true;
+  String? _currentLanguage;
+  String? _noteContent;
+  bool _dataLoading = true;
   double _angle = 0;
 
-  static const int _maxNoteLength = 100000;
+  static const int _maxNoteLength = 1000000;
 
   @override
   void initState() {
@@ -36,6 +44,7 @@ class _NhanDienTabState extends State<NhanDienTab> with SingleTickerProviderStat
     _noteController = TextEditingController();
     _languageRef = FirebaseDatabase.instance.ref("Results/language");
     _noteRef = FirebaseDatabase.instance.ref("Results/text");
+    _deviceRef = FirebaseDatabase.instance.ref("Results/device");
 
     _controller = AnimationController(
       vsync: this,
@@ -46,24 +55,29 @@ class _NhanDienTabState extends State<NhanDienTab> with SingleTickerProviderStat
       final data = event.snapshot.value?.toString();
       if (data?.isNotEmpty ?? false) {
         setState(() {
-          _ngonNguHienTai = _mapLanguage(data!);
-          _dangChoDuLieu = false;
+          _currentLanguage = _mapLanguage(data!);
+          _dataLoading = false;
         });
       }
     });
-
     // Bước 1: Tải dữ liệu từ Firestore trước
     _loadNotesFromFirestore().then((_) {
       // Bước 2: Bắt đầu lắng nghe dữ liệu mới
       _startListeningToRealtimeDatabase();
     });
-
     // Fallback nếu sau 5s chưa có ngôn ngữ
     Future.delayed(const Duration(seconds: 5), () {
-      if (_ngonNguHienTai == null) {
-        setState(() => _dangChoDuLieu = true);
+      if (_currentLanguage == null) {
+        setState(() => _dataLoading = true);
       }
     });
+    widget.recognizedLanguage.addListener(_onLanguageOrContentChanged);
+    widget.recognizedContent.addListener(_onLanguageOrContentChanged);
+  }
+
+  void startListeningFromUpload() {
+    debugPrint("Bắt đầu lắng nghe dữ liệu từ API sau khi upload");
+    _startListeningToApiResult();
   }
 
   @override
@@ -78,23 +92,44 @@ class _NhanDienTabState extends State<NhanDienTab> with SingleTickerProviderStat
   Future<void> _loadNotesFromFirestore() async {
     final user = FirebaseAuth.instance.currentUser;
     final email = user?.email;
+
     if (email != null) {
       try {
         final firestore = FirebaseFirestore.instance;
-        final query = await firestore
-            .collection('User_Information')
-            .where('Email', isEqualTo: email)
-            .get();
+        final query =
+            await firestore
+                .collection('User_Information')
+                .where('Email', isEqualTo: email)
+                .get();
 
         if (query.docs.isNotEmpty) {
           final doc = query.docs.first;
-          if (doc.exists) {
-            final displayedContent = doc['Displayed Content'] ?? '';
-            setState(() {
-              _noteController.text = displayedContent;
-              _noiDungGhiChu = displayedContent;
-            });
-          }
+          final docRef = doc.reference;
+
+          // Lấy toàn bộ content từ subcollection Content_History, sắp xếp theo thời gian
+          final contentHistorySnapshot =
+              await docRef
+                  .collection('Content_History')
+                  .orderBy(
+                    'timestamp',
+                    descending: false,
+                  ) // đoạn chat mới nhất lên đầu
+                  .get();
+
+          final entries =
+              contentHistorySnapshot.docs.map((doc) {
+                final text = doc['text'] ?? '';
+                final source = doc['source'] ?? '';
+                final language = doc['language'] ?? '';
+                return '[$source] \n  $text';
+              }).toList();
+
+          final combinedText = entries.join('\n');
+
+          setState(() {
+            _noteController.text = combinedText;
+            _noteContent = combinedText;
+          });
         }
       } catch (e) {
         if (kDebugMode) print("Lỗi khi tải ghi chú từ Firestore: $e");
@@ -106,51 +141,102 @@ class _NhanDienTabState extends State<NhanDienTab> with SingleTickerProviderStat
     _noteSub = _noteRef.onValue.listen((event) async {
       final data = event.snapshot.value?.toString();
       if (data?.isNotEmpty ?? false) {
-        final newEntry = "$data\n";
+        // Đọc giá trị của source từ _deviceRef (ví dụ: "raspberry")
+        final deviceSnapshot = await _deviceRef.get();
+        final source = deviceSnapshot.value?.toString() ?? 'unknown';
+
+        final newEntry = "[$source]\n  $data\n";
         final current = _noteController.text;
-        final updatedText = newEntry + current;
+        final updatedText = current + newEntry;
 
-        _noiDungGhiChu = updatedText.length > _maxNoteLength
-            ? updatedText.substring(0, _maxNoteLength)
-            : updatedText;
+        _noteContent =
+            updatedText.length > _maxNoteLength
+                ? updatedText.substring(0, _maxNoteLength)
+                : updatedText;
 
-        // Lưu mới vào Firestore (append, không ghi đè)
-        await _appendNoteToFirestore(newEntry);
+        // Lưu với source lấy từ _deviceRef
+        await _appendNoteToFirestore(data!, source: source);
 
         setState(() {
-          _noteController.text = _noiDungGhiChu!;
+          _noteController.text = _noteContent!;
         });
+        _noteController.selection = TextSelection.fromPosition(
+          TextPosition(offset: _noteController.text.length),
+        );
         await _noteRef.set('');
       }
     });
   }
 
-  Future<void> _appendNoteToFirestore(String newEntry) async {
+  void _startListeningToApiResult() {
+    widget.recognizedLanguage.addListener(_onLanguageOrContentChanged);
+  }
+  void _onLanguageOrContentChanged() async {
+    final language = widget.recognizedLanguage.value;
+    final content = widget.recognizedContent.value;
+
+    if ((language?.isNotEmpty ?? false) || (content?.isNotEmpty ?? false)) {
+      final newEntry = "[App]\n  ${content ?? ''}\n"; // Hiển thị đúng định dạng
+
+      final current = _noteController.text;
+      final updatedText = current + newEntry; // Thêm vào cuối
+
+      _noteContent =
+          updatedText.length > _maxNoteLength
+              ? updatedText.substring(updatedText.length - _maxNoteLength)
+              : updatedText;
+
+      await _appendNoteToFirestore(
+        content ?? '',
+        source: 'App',
+        language: language,
+      );
+
+      if (language?.isNotEmpty ?? false) {
+        setState(() {
+          _currentLanguage = _mapLanguage(language!);
+          _dataLoading = false;
+        });
+      }
+
+    if (mounted) {
+      setState(() {
+        _noteController.text = _noteContent!;
+        _noteController.selection = TextSelection.fromPosition(
+          TextPosition(offset: _noteController.text.length),
+        );
+      });
+    }
+
+      widget.recognizedLanguage.value = null;
+      widget.recognizedContent.value = null;
+    }
+  }
+
+  Future<void> _appendNoteToFirestore(
+    String newEntry, {
+    required String source,
+    String? language,
+  }) async {
     final user = FirebaseAuth.instance.currentUser;
-    final email = user?.email;
-    if (email != null) {
+    final uid = user?.uid;
+
+    if (uid != null) {
       try {
-        final firestore = FirebaseFirestore.instance;
-        final query = await firestore
+        final docRef = FirebaseFirestore.instance
             .collection('User_Information')
-            .where('Email', isEqualTo: email)
-            .get();
+            .doc(uid)
+            .collection('Content_History');
 
-        if (query.docs.isNotEmpty) {
-          final doc = query.docs.first;
-          final docRef = doc.reference;
-
-          final existingContent = doc['Displayed Content'] ?? '';
-          final combined = "$newEntry$existingContent";
-
-          final clipped = combined.length > _maxNoteLength
-              ? combined.substring(0, _maxNoteLength)
-              : combined;
-
-          await docRef.set({'Displayed Content': clipped}, SetOptions(merge: true));
-        }
+        await docRef.add({
+          'text': newEntry.trim(),
+          'language': language ?? '',
+          'source': source,
+          'isUser': source == 'App',
+          'timestamp': Timestamp.now(),
+        });
       } catch (e) {
-        if (kDebugMode) print("Lỗi Firestore (append): $e");
+        if (kDebugMode) print("Lỗi khi thêm entry vào Firestore: $e");
       }
     }
   }
@@ -181,6 +267,7 @@ class _NhanDienTabState extends State<NhanDienTab> with SingleTickerProviderStat
       'english': 'us',
       'us': 'us',
       'tiếng anh mỹ': 'us',
+      'en': 'us',
       'british': 'gb',
       'england': 'gb',
       'uk': 'gb',
@@ -244,7 +331,7 @@ class _NhanDienTabState extends State<NhanDienTab> with SingleTickerProviderStat
           const SizedBox(width: 8),
           Expanded(
             child: Text(
-              _ngonNguHienTai ?? '',
+              _currentLanguage ?? '',
               textAlign: TextAlign.center,
               style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w500),
             ),
@@ -254,17 +341,37 @@ class _NhanDienTabState extends State<NhanDienTab> with SingleTickerProviderStat
     );
   }
 
+  Future<void> _clearContentHistoryForCurrentUser() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    final userDocId = user.uid;
+
+    final historyCollection = FirebaseFirestore.instance
+        .collection('User_Information')
+        .doc(userDocId)
+        .collection('Content_History');
+
+    final snapshot = await historyCollection.get();
+
+    for (final doc in snapshot.docs) {
+      await doc.reference.delete();
+    }
+  }
+
   Widget _buildTextContentDisplay(double width) {
     Widget child;
     Key key;
-    if (_dangChoDuLieu) {
+    if (_dataLoading) {
       child = _buildWaitingCard(width);
       key = const ValueKey('waiting');
-    } else if (_ngonNguHienTai != null) {
-      child = _buildLanguageCard(width, getCountryCode(_ngonNguHienTai!));
-      key = ValueKey('lang-$_ngonNguHienTai');
+    } else if (_currentLanguage != null) {
+      child = _buildLanguageCard(width, getCountryCode(_currentLanguage!));
+      key = ValueKey('lang-$_currentLanguage');
     } else {
-      child = const Center(child: Text("Không có dữ liệu.", style: TextStyle(color: Colors.red)));
+      child = const Center(
+        child: Text("Không có dữ liệu.", style: TextStyle(color: Colors.red)),
+      );
       key = const ValueKey('no-data');
     }
     return AnimatedSwitcher(
@@ -310,13 +417,13 @@ class _NhanDienTabState extends State<NhanDienTab> with SingleTickerProviderStat
               const Spacer(),
               IconButton(
                 icon: const Icon(Icons.clear, color: Colors.red),
-                tooltip: "Xoá toàn bộ ghi chú",
+                tooltip: "Xoá toàn bộ khung nội dung",
                 onPressed: () async {
                   final confirm = await showDialog<bool>(
                     context: context,
                     builder: (context) => AlertDialog(
                       title: const Text("Xác nhận xoá"),
-                      content: const Text("Bạn có chắc muốn xoá toàn bộ nội dung ghi chú không?"),
+                      content: const Text("Bạn có chắc muốn xoá toàn bộ nội dung không?"),
                       actions: [
                         TextButton(
                           onPressed: () => Navigator.pop(context, false),
@@ -329,30 +436,16 @@ class _NhanDienTabState extends State<NhanDienTab> with SingleTickerProviderStat
                       ],
                     ),
                   );
+
                   if (confirm == true) {
                     setState(() {
                       _noteController.clear();
-                      _noiDungGhiChu = "";
+                      _noteContent = '';
                     });
-                    // Xoá luôn nội dung trên Firestore
-                    final user = FirebaseAuth.instance.currentUser;
-                    final email = user?.email;
-                    if (email != null) {
-                      final firestore = FirebaseFirestore.instance;
-
-                      final query = await firestore
-                          .collection('User_Information')
-                          .where('Email', isEqualTo: email)
-                          .get();
-
-                      if (query.docs.isNotEmpty) {
-                        final docRef = query.docs.first.reference;
-                        await docRef.update({'Displayed Content': ''}); 
-                      }
-                    }
+                    await _clearContentHistoryForCurrentUser();
                   }
                 },
-              ),
+              )
             ],
           ),
           const SizedBox(height: 2),
