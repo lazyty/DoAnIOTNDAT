@@ -1,4 +1,3 @@
-// ignore_for_file: unused_field
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -34,7 +33,8 @@ class _GhiAmTabState extends State<GhiAmTab> {
   final record = AudioRecorder();
   final player = AudioPlayer();
   final List<String> _recordedFiles = [];
-
+  Set<String> uploadingFiles = {};
+  // ignore: unused_field
   String? _currentRecordingPath;
   bool isRecording = false;
   bool isPaused = false;
@@ -42,7 +42,6 @@ class _GhiAmTabState extends State<GhiAmTab> {
   String? currentlyPlayingPath;
   Timer? _timer;
   Duration _currentDuration = Duration.zero;
-  bool isUploading = false;
 
   @override
   void dispose() {
@@ -195,7 +194,7 @@ class _GhiAmTabState extends State<GhiAmTab> {
           _currentDuration += const Duration(seconds: 1);
         });
       } else {
-        _timer?.cancel(); // đảm bảo không tiếp tục gọi khi widget đã dispose
+        _timer?.cancel();
       }
     });
     if (mounted) {
@@ -224,13 +223,14 @@ class _GhiAmTabState extends State<GhiAmTab> {
 
   Future<void> uploadFile(String path) async {
     setState(() {
-      isUploading = true;
+      uploadingFiles.add(path);
+      if (kDebugMode) print("⬆️ Bắt đầu upload: $uploadingFiles");
     });
 
     try {
       var request = http.MultipartRequest(
         'POST',
-        Uri.parse('http://34.53.70.78:30080/detect-language/'),
+        Uri.parse('http://34.136.208.29:8080/detect-language/'),
       );
       request.files.add(
         await http.MultipartFile.fromPath(
@@ -241,29 +241,51 @@ class _GhiAmTabState extends State<GhiAmTab> {
       );
       var response = await request.send();
       final responseBody = await response.stream.bytesToString();
+
       if (response.statusCode == 200) {
         final jsonData = jsonDecode(responseBody);
-          if (kDebugMode) {
-            print('Server response JSON: $jsonData');
+        if (kDebugMode) print('✅ Server response JSON: $jsonData');
+
+        if (jsonData['language'] != null && jsonData['text'] != null) {
+          if (mounted) {
+            widget.recognizedLanguage.value = jsonData['language'] as String;
+            widget.recognizedContent.value = jsonData['text'] as String;
+            widget.onUploadSuccess?.call();
+
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Upload thành công!')),
+            );
           }
-        widget.recognizedLanguage.value = jsonData['language'] as String?;
-        widget.recognizedContent.value = jsonData['text'] as String?;
-        widget.onUploadSuccess?.call();
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Upload thành công!')));
+        } else {
+          if (kDebugMode) {
+            print("⚠️ Dữ liệu thiếu trường 'language' hoặc 'text': $jsonData");
+          }
+        }
       } else {
         throw 'Lỗi upload: ${response.statusCode}';
       }
-    } catch (e) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Upload thất bại: $e')));
-      widget.recognizedLanguage.value = null; // Reset on failure
+    } catch (e, stackTrace) {
+      if (kDebugMode) {
+        print("❌ Exception khi upload: $e");
+      }
+      if (kDebugMode) {
+        print("📌 Stacktrace: $stackTrace");
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Upload thất bại: $e')),
+        );
+        widget.recognizedLanguage.value = null;
+      }
     } finally {
-      setState(() {
-        isUploading = false;
-      });
+      if (mounted) {
+        setState(() {
+          uploadingFiles.remove(path);
+          if (kDebugMode) {
+            print("✅ Kết thúc upload: $uploadingFiles");
+          }
+        });
+      }
     }
   }
 
@@ -389,18 +411,16 @@ class _GhiAmTabState extends State<GhiAmTab> {
                           onPressed: () => playAudio(path),
                         ),
                         IconButton(
-                          icon:
-                              isUploading
-                                  ? const SizedBox(
-                                    width: 24,
-                                    height: 24,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                    ),
-                                  )
-                                  : const Icon(Icons.cloud_upload),
-                          onPressed:
-                              isUploading ? null : () => uploadFile(path),
+                          icon: uploadingFiles.contains(path)
+                              ? const SizedBox(
+                                  width: 24,
+                                  height: 24,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(Icons.cloud_upload),
+                          onPressed: uploadingFiles.contains(path) ? null : () => uploadFile(path),
                         ),
                         IconButton(
                           icon: const Icon(Icons.delete),

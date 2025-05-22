@@ -82,11 +82,11 @@ class _ManHinhChinhScreenState extends State<ManHinhChinhScreen> {
           child: TabBarView(
             children: [
               NhanDienTab(key: _nhanDienTabKey,recognizedLanguage: recognizedLanguage, recognizedContent: recognizedContent,),
-                      GhiAmTab(recognizedLanguage: recognizedLanguage, recognizedContent: recognizedContent,
-                        onUploadSuccess: () {
-                          _nhanDienTabKey.currentState?.startListeningFromUpload();
-                        },
-                      ),
+              GhiAmTab(recognizedLanguage: recognizedLanguage, recognizedContent: recognizedContent,
+              onUploadSuccess: () {
+                _nhanDienTabKey.currentState?.startListeningFromUpload();
+                },
+              ),
             ],
           ),
         ),

@@ -21,22 +21,42 @@ class NhanDienTab extends StatefulWidget {
   State<NhanDienTab> createState() => NhanDienTabState();
 }
 
+class NoteEntry {
+  final String source;
+  final String data;
+  final String language;
+
+  NoteEntry({required this.source, required this.language, required this.data});
+
+  @override
+  String toString() {
+    return '[$source] - [$language]:\n  $data';
+  }
+}
+
 class NhanDienTabState extends State<NhanDienTab>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, AutomaticKeepAliveClientMixin {
   late final AnimationController _controller;
   late final DatabaseReference _languageRef;
   late final DatabaseReference _noteRef;
   late final DatabaseReference _deviceRef;
   late final TextEditingController _noteController;
+  final ScrollController _scrollController = ScrollController();
   StreamSubscription? _languageSub;
   StreamSubscription? _noteSub;
 
   String? _currentLanguage;
   String? _noteContent;
+  // ignore: unused_field
   bool _dataLoading = true;
-  double _angle = 0;
+  String? _lastSavedContent;
+  DateTime? _lastSavedTime;
+  bool _isSaving = false;
 
-  static const int _maxNoteLength = 1000000;
+  static const int _maxNoteLength = 500000;
+
+  @override
+  bool get wantKeepAlive => true;
 
   @override
   void initState() {
@@ -75,53 +95,41 @@ class NhanDienTabState extends State<NhanDienTab>
     widget.recognizedContent.addListener(_onLanguageOrContentChanged);
   }
 
-  void startListeningFromUpload() {
-    debugPrint("Bắt đầu lắng nghe dữ liệu từ API sau khi upload");
-    _startListeningToApiResult();
-  }
-
   @override
   void dispose() {
     _controller.dispose();
     _languageSub?.cancel();
     _noteSub?.cancel();
     _noteController.dispose();
+    _scrollController.dispose();
+    widget.recognizedLanguage.removeListener(_onLanguageOrContentChanged);
+    widget.recognizedContent.removeListener(_onLanguageOrContentChanged);
     super.dispose();
   }
 
   Future<void> _loadNotesFromFirestore() async {
     final user = FirebaseAuth.instance.currentUser;
-    final email = user?.email;
 
-    if (email != null) {
+    if (user != null) {
       try {
         final firestore = FirebaseFirestore.instance;
-        final query =
-            await firestore
-                .collection('User_Information')
-                .where('Email', isEqualTo: email)
-                .get();
+        final docRef = firestore.collection('User_Information').doc(user.uid);
+        final docSnapshot = await docRef.get();
 
-        if (query.docs.isNotEmpty) {
-          final doc = query.docs.first;
-          final docRef = doc.reference;
-
-          // Lấy toàn bộ content từ subcollection Content_History, sắp xếp theo thời gian
+        if (docSnapshot.exists) {
           final contentHistorySnapshot =
               await docRef
                   .collection('Content_History')
-                  .orderBy(
-                    'timestamp',
-                    descending: false,
-                  ) // đoạn chat mới nhất lên đầu
+                  .orderBy('timestamp', descending: false)
                   .get();
 
           final entries =
               contentHistorySnapshot.docs.map((doc) {
-                final text = doc['text'] ?? '';
-                final source = doc['source'] ?? '';
-                final language = doc['language'] ?? '';
-                return '[$source] \n  $text';
+                final data = doc.data();
+                final text = data['text'] ?? '';
+                final source = data['source'] ?? '';
+                final language = data['language'] ?? '';
+                return '[$source] - [$language]:\n  $text';
               }).toList();
 
           final combinedText = entries.join('\n');
@@ -130,215 +138,223 @@ class NhanDienTabState extends State<NhanDienTab>
             _noteController.text = combinedText;
             _noteContent = combinedText;
           });
+        } else {
+          debugPrint(
+            "⚠️ Không tìm thấy tài liệu người dùng với uid: ${user.uid}",
+          );
         }
-      } catch (e) {
-        if (kDebugMode) print("Lỗi khi tải ghi chú từ Firestore: $e");
+      } catch (e, stack) {
+        debugPrint("❌ Lỗi khi tải ghi chú từ Firestore: $e\n$stack");
       }
+    } else {
+      debugPrint("⚠️ Không tìm thấy user hiện tại.");
     }
   }
 
   void _startListeningToRealtimeDatabase() {
+    debugPrint('🟠 Bắt đầu lắng nghe Firebase Realtime Database...');
     _noteSub = _noteRef.onValue.listen((event) async {
       final data = event.snapshot.value?.toString();
       if (data?.isNotEmpty ?? false) {
-        // Đọc giá trị của source từ _deviceRef (ví dụ: "raspberry")
+        final languageSnapshot = await _languageRef.get();
+        final language = languageSnapshot.value?.toString() ?? 'unknown';
+        final displayLanguage = _mapLanguage(language);
         final deviceSnapshot = await _deviceRef.get();
         final source = deviceSnapshot.value?.toString() ?? 'unknown';
 
-        final newEntry = "[$source]\n  $data\n";
+        final noteEntry = NoteEntry(
+          source: source,
+          language: displayLanguage,
+          data: data!,
+        );
         final current = _noteController.text;
-        final updatedText = current + newEntry;
+        final updatedText = current.isEmpty
+            ? noteEntry.toString()
+            : '$current\n${noteEntry.toString()}';
 
-        _noteContent =
-            updatedText.length > _maxNoteLength
-                ? updatedText.substring(0, _maxNoteLength)
-                : updatedText;
+        if (updatedText.length > _maxNoteLength) {
+          if (kDebugMode) {
+            debugPrint('🔴 Vượt quá giới hạn ký tự cho phép ($_maxNoteLength ký tự)');
+          }
+          await _noteRef.set(''); // reset dù bị lỗi
+          return; // bỏ qua cập nhật
+        }
+        _noteContent = updatedText;
 
         // Lưu với source lấy từ _deviceRef
-        await _appendNoteToFirestore(data!, source: source);
-
-        setState(() {
-          _noteController.text = _noteContent!;
-        });
-        _noteController.selection = TextSelection.fromPosition(
-          TextPosition(offset: _noteController.text.length),
+        await _appendNoteToFirestore(
+          data,
+          source: source,
+          language: displayLanguage,
         );
+
+        if (mounted) {
+          setState(() {
+            _noteController.text = _noteContent!;
+            _noteController.selection = TextSelection.fromPosition(
+              TextPosition(offset: _noteController.text.length),
+            );
+          });
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (_scrollController.hasClients) {
+              _scrollController.animateTo(
+                _scrollController.position.maxScrollExtent,
+                duration: const Duration(milliseconds: 300),
+                curve: Curves.easeOut,
+              );
+            }
+          });
+        }
         await _noteRef.set('');
       }
     });
   }
 
+  void startListeningFromUpload() {
+    debugPrint("Bắt đầu lắng nghe dữ liệu từ API sau khi upload");
+    _startListeningToApiResult();
+  }
+
   void _startListeningToApiResult() {
     widget.recognizedLanguage.addListener(_onLanguageOrContentChanged);
   }
+
   void _onLanguageOrContentChanged() async {
-    final language = widget.recognizedLanguage.value;
+    final language = widget.recognizedLanguage.value?.toLowerCase().trim() ?? '';
+    final displayLanguage = _mapLanguage(language);
+        final user = FirebaseAuth.instance.currentUser;
+        final snapshot =
+        await FirebaseFirestore.instance
+            .collection('User_Information')
+            .doc(user?.uid)
+            .get();
+    final username = snapshot.data()?['Username'] ?? 'unknown';
     final content = widget.recognizedContent.value;
 
-    if ((language?.isNotEmpty ?? false) || (content?.isNotEmpty ?? false)) {
-      final newEntry = "[App]\n  ${content ?? ''}\n"; // Hiển thị đúng định dạng
-
-      final current = _noteController.text;
-      final updatedText = current + newEntry; // Thêm vào cuối
-
-      _noteContent =
-          updatedText.length > _maxNoteLength
-              ? updatedText.substring(updatedText.length - _maxNoteLength)
-              : updatedText;
-
-      await _appendNoteToFirestore(
-        content ?? '',
-        source: 'App',
-        language: language,
+    if ((language.isNotEmpty) && (content?.isNotEmpty ?? false)) {
+      final noteEntry = NoteEntry(
+        source: 'User: $username',
+        language: displayLanguage,
+        data: content ?? '',
       );
 
-      if (language?.isNotEmpty ?? false) {
+      final current = _noteController.text;
+      final updatedText = current.isEmpty
+          ? noteEntry.toString()
+          : '$current\n${noteEntry.toString()}';
+
+        if (updatedText.length > _maxNoteLength) {
+          if (kDebugMode) {
+            debugPrint('🔴 Vượt quá giới hạn ký tự cho phép ($_maxNoteLength ký tự)');
+          }
+          await _noteRef.set(''); // reset dù bị lỗi
+          return; // bỏ qua cập nhật
+        }
+        _noteContent = updatedText;
+        
+      await _appendNoteToFirestore(
+        content ?? '',
+        source: 'User: $username',
+        language: displayLanguage,
+      );
+
+      if (mounted) {
         setState(() {
-          _currentLanguage = _mapLanguage(language!);
-          _dataLoading = false;
+          _noteController.text = _noteContent!;
+          _noteController.selection = TextSelection.fromPosition(
+            TextPosition(offset: _noteController.text.length),
+          );
+        });
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (_scrollController.hasClients) {
+            _scrollController.animateTo(
+              _scrollController.position.maxScrollExtent,
+              duration: const Duration(milliseconds: 300),
+              curve: Curves.easeOut,
+            );
+          }
         });
       }
-
-    if (mounted) {
-      setState(() {
-        _noteController.text = _noteContent!;
-        _noteController.selection = TextSelection.fromPosition(
-          TextPosition(offset: _noteController.text.length),
-        );
-      });
-    }
-
       widget.recognizedLanguage.value = null;
       widget.recognizedContent.value = null;
     }
   }
 
-  Future<void> _appendNoteToFirestore(
-    String newEntry, {
-    required String source,
-    String? language,
-  }) async {
-    final user = FirebaseAuth.instance.currentUser;
-    final uid = user?.uid;
+ Future<void> _appendNoteToFirestore(
+  String newEntry, {
+  required String source,
+  String? language,
+}) async {
+  final trimmedEntry = newEntry.trim();
+  final now = DateTime.now();
 
-    if (uid != null) {
-      try {
-        final docRef = FirebaseFirestore.instance
-            .collection('User_Information')
-            .doc(uid)
-            .collection('Content_History');
-
-        await docRef.add({
-          'text': newEntry.trim(),
-          'language': language ?? '',
-          'source': source,
-          'isUser': source == 'App',
-          'timestamp': Timestamp.now(),
-        });
-      } catch (e) {
-        if (kDebugMode) print("Lỗi khi thêm entry vào Firestore: $e");
-      }
-    }
+  // Nếu đang lưu hoặc dữ liệu trùng trong 5 giây → bỏ qua
+  if (_isSaving ||
+      (_lastSavedContent == trimmedEntry &&
+       _lastSavedTime != null &&
+       now.difference(_lastSavedTime!).inSeconds < 5)) {
+    if (kDebugMode) print('Bỏ qua lưu vì trùng hoặc đang xử lý');
+    return;
   }
+
+  _isSaving = true;
+
+  final user = FirebaseAuth.instance.currentUser;
+  final uid = user?.uid;
+
+  if (uid != null) {
+    try {
+      final firestore = FirebaseFirestore.instance;
+      final docRef = firestore
+          .collection('User_Information')
+          .doc(uid)
+          .collection('Content_History');
+
+      final userDoc = await firestore
+          .collection('User_Information')
+          .doc(uid)
+          .get();
+
+      final username = userDoc.data()?['Username'] ?? 'unknown';
+
+      await docRef.add({
+        'text': trimmedEntry,
+        'language': language ?? '',
+        'source': source,
+        'isUser': source == username,
+        'timestamp': Timestamp.now(),
+      });
+
+      // Cập nhật nội dung & thời gian lần lưu gần nhất
+      _lastSavedContent = trimmedEntry;
+      _lastSavedTime = now;
+
+    } catch (e) {
+      if (kDebugMode) print("Lỗi khi thêm entry vào Firestore: $e");
+    } finally {
+      _isSaving = false;
+    }
+  } else {
+    _isSaving = false;
+  }
+}
+
 
   String _mapLanguage(String language) {
     const languageMap = {
-      'vi': 'Tiếng Việt',
-      'us': 'Tiếng Anh Mỹ',
-      'gb': 'Tiếng Anh Anh',
-      'en': 'Tiếng Anh',
-      'jp': 'Tiếng Nhật',
-      'kr': 'Tiếng Hàn',
-      'fr': 'Tiếng Pháp',
-      'de': 'Tiếng Đức',
-      'cn': 'Tiếng Trung',
-      'es': 'Tiếng Tây Ban Nha',
-      'th': 'Tiếng Thái',
+      'vi': '🇻🇳 Tiếng Việt',
+      'us': '🇺🇸 Tiếng Anh Mỹ',
+      'en': '🇺🇸 Tiếng Anh',
+      'gb': '🇬🇧 Tiếng Anh Anh',
+      'jp': '🇯🇵 Tiếng Nhật',
+      'kr': '🇰🇷 Tiếng Hàn',
+      'fr': '🇫🇷 Tiếng Pháp',
+      'de': '🇩🇪 Tiếng Đức',
+      'cn': '🇨🇳 Tiếng Trung',
+      'es': '🇪🇸 Tiếng Tây Ban Nha',
+      'th': '🇹🇭 Tiếng Thái',
     };
-    return languageMap[language.toLowerCase().trim()] ?? 'Không xác định';
-  }
-
-  String getCountryCode(String language) {
-    final lower = language.toLowerCase().trim();
-    const languageMap = {
-      'vi': 'vn',
-      'vietnam': 'vn',
-      'tiếng việt': 'vn',
-      'english': 'us',
-      'us': 'us',
-      'tiếng anh mỹ': 'us',
-      'en': 'us',
-      'british': 'gb',
-      'england': 'gb',
-      'uk': 'gb',
-      'tiếng anh anh': 'gb',
-      'japanese': 'jp',
-      'jp': 'jp',
-      'tiếng nhật': 'jp',
-      'korean': 'kr',
-      'kr': 'kr',
-      'tiếng hàn': 'kr',
-      'french': 'fr',
-      'fr': 'fr',
-      'tiếng pháp': 'fr',
-      'german': 'de',
-      'de': 'de',
-      'tiếng đức': 'de',
-      'chinese': 'cn',
-      'cn': 'cn',
-      'tiếng trung': 'cn',
-      'spanish': 'es',
-      'es': 'es',
-      'tiếng tây ban nha': 'es',
-      'thai': 'th',
-      'th': 'th',
-      'tiếng thái': 'th',
-    };
-    return languageMap[lower] ?? 'vn';
-  }
-
-  Widget _buildLanguageCard(double width, String countryCode) {
-    return Container(
-      width: width,
-      padding: const EdgeInsets.all(16),
-      decoration: _boxDecoration(),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          SizedBox(
-            width: 40,
-            height: 40,
-            child: AnimatedBuilder(
-              animation: _controller,
-              builder: (_, __) {
-                _angle = _controller.value * 2 * pi;
-                return CustomPaint(
-                  painter: WavePainter(_angle),
-                  child: Center(
-                    child: SvgPicture.asset(
-                      'icons/flags/svg/$countryCode.svg',
-                      package: 'country_icons',
-                      width: 24,
-                      height: 24,
-                      fit: BoxFit.contain,
-                      placeholderBuilder: (_) => const Icon(Icons.flag),
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              _currentLanguage ?? '',
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w500),
-            ),
-          ),
-        ],
-      ),
-    );
+    return languageMap[language.toLowerCase().trim()] ?? '🌐 Không xác định';
   }
 
   Future<void> _clearContentHistoryForCurrentUser() async {
@@ -359,115 +375,116 @@ class NhanDienTabState extends State<NhanDienTab>
     }
   }
 
-  Widget _buildTextContentDisplay(double width) {
-    Widget child;
-    Key key;
-    if (_dataLoading) {
-      child = _buildWaitingCard(width);
-      key = const ValueKey('waiting');
-    } else if (_currentLanguage != null) {
-      child = _buildLanguageCard(width, getCountryCode(_currentLanguage!));
-      key = ValueKey('lang-$_currentLanguage');
-    } else {
-      child = const Center(
-        child: Text("Không có dữ liệu.", style: TextStyle(color: Colors.red)),
-      );
-      key = const ValueKey('no-data');
-    }
-    return AnimatedSwitcher(
-      duration: const Duration(milliseconds: 400),
-      child: Container(key: key, child: child),
-    );
+    List<TextSpan> _buildStyledNoteTextSpans(String text) {
+    final lines = text.trim().split('\n');
+    return lines.map((line) {
+      final regex = RegExp(r'^\[(.*?)\] - \[(.*?)\]:(.*)$');
+      final match = regex.firstMatch(line);
+      if (match != null) {
+        final source = match.group(1)!;
+        final language = match.group(2)!;
+        final content = match.group(3)!.trim();
+        final sourceColor = source == 'User' ? Colors.red : Colors.blue;
+        return TextSpan(
+          children: [
+            TextSpan(
+              text: '[$source]',
+              style: TextStyle(fontWeight: FontWeight.bold, color: sourceColor),
+            ),
+            const TextSpan(text: ' - ',style: TextStyle(fontWeight: FontWeight.bold),),
+            TextSpan(
+              text: '[$language]',
+              style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.deepPurple),
+            ),
+            TextSpan(
+              text: '$content\n',
+              style: const TextStyle(fontWeight: FontWeight.normal),
+            ),
+          ],
+        );
+      } else {
+        return TextSpan(text: '$line\n');
+      }
+    }).toList();
   }
 
-  Widget _buildWaitingCard(double width) {
-    return Container(
-      width: width,
-      padding: const EdgeInsets.all(16),
-      decoration: _boxDecoration(),
-      child: const Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          CircularProgressIndicator(),
-          SizedBox(height: 12),
-          Text(
-            "⏳ Đang chờ dữ liệu từ server...",
-            style: TextStyle(fontSize: 20, color: Colors.grey),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildContentField(double height) {
-    return Container(
-      margin: const EdgeInsets.only(top: 5),
-      padding: const EdgeInsets.all(10),
-      height: height * 0.6,
-      decoration: _boxDecoration(),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Text(
-                "📝 Nội dung",
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-              ),
-              const Spacer(),
-              IconButton(
-                icon: const Icon(Icons.clear, color: Colors.red),
-                tooltip: "Xoá toàn bộ khung nội dung",
-                onPressed: () async {
-                  final confirm = await showDialog<bool>(
-                    context: context,
-                    builder: (context) => AlertDialog(
-                      title: const Text("Xác nhận xoá"),
-                      content: const Text("Bạn có chắc muốn xoá toàn bộ nội dung không?"),
-                      actions: [
-                        TextButton(
-                          onPressed: () => Navigator.pop(context, false),
-                          child: const Text("Huỷ"),
-                        ),
-                        TextButton(
-                          onPressed: () => Navigator.pop(context, true),
-                          child: const Text("Xoá", style: TextStyle(color: Colors.red)),
-                        ),
-                      ],
-                    ),
-                  );
-
-                  if (confirm == true) {
-                    setState(() {
-                      _noteController.clear();
-                      _noteContent = '';
-                    });
-                    await _clearContentHistoryForCurrentUser();
-                  }
-                },
-              )
-            ],
-          ),
-          const SizedBox(height: 2),
-          Expanded(
-            child: TextField(
-              controller: _noteController,
-              expands: true,
-              maxLines: null,
-              minLines: null,
-              readOnly: true,
-              maxLength: _maxNoteLength,
-              textAlignVertical: TextAlignVertical.top,
-              decoration: const InputDecoration(
-                border: OutlineInputBorder(),
-                contentPadding: EdgeInsets.only(top: 0, left: 8, right: 8),
+Widget _buildContentField(double width, double height) {
+  return Container(
+    margin: const EdgeInsets.only(top: 3),
+    padding: const EdgeInsets.all(10),
+    decoration: _boxDecoration(),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Text(
+              "📝 Nội dung",
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const Spacer(),
+            IconButton(
+              icon: const Icon(Icons.clear, color: Colors.red),
+              tooltip: "Xoá toàn bộ khung nội dung",
+              onPressed: () async {
+                final confirm = await showDialog<bool>(
+                  context: context,
+                  builder: (context) => AlertDialog(
+                    title: const Text("Xác nhận xoá"),
+                    content: const Text("Bạn có chắc muốn xoá toàn bộ nội dung không?"),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(context, false),
+                        child: const Text("Huỷ"),
+                      ),
+                      TextButton(
+                        onPressed: () => Navigator.pop(context, true),
+                        child: const Text("Xoá", style: TextStyle(color: Colors.red)),
+                      ),
+                    ],
+                  ),
+                );
+                if (confirm == true) {
+                  setState(() {
+                    _noteController.clear();
+                    _noteContent = '';
+                  });
+                  await _clearContentHistoryForCurrentUser();
+                }
+              },
+            ),
+          ],
+        ),
+        SizedBox(
+          width: width,
+          height: height * 0.65,
+          child: Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              border: Border.all(color: Colors.grey, width: 1.2),
+              borderRadius: BorderRadius.circular(8),
+              color: Colors.white,
+            ),
+            child: Scrollbar(
+              thumbVisibility: true,
+              controller: _scrollController,
+              child: SingleChildScrollView(
+                controller: _scrollController,
+                child: SelectableText.rich(
+                  TextSpan(
+                    children: _buildStyledNoteTextSpans(_noteController.text),
+                  ),
+                  textAlign: TextAlign.start,
+                  style: const TextStyle(fontSize: 16, color: Colors.black),
+                ),
               ),
             ),
           ),
-        ],
-      ),
-    );
-  }
+        ),
+      ],
+    ),
+  );
+}
 
   BoxDecoration _boxDecoration() => BoxDecoration(
     color: Colors.white,
@@ -483,12 +500,8 @@ class NhanDienTabState extends State<NhanDienTab>
       child: Column(
         children: [
           Padding(
-            padding: const EdgeInsets.all(16),
-            child: _buildTextContentDisplay(width),
-          ),
-          Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: _buildContentField(height),
+            child: _buildContentField(width, height),
           ),
         ],
       ),
@@ -497,6 +510,7 @@ class NhanDienTabState extends State<NhanDienTab>
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     final screenWidth = MediaQuery.of(context).size.width;
     final screenHeight = MediaQuery.of(context).size.height;
     return _buildNhandienTab(screenWidth, screenHeight);
