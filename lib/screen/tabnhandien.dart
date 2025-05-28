@@ -1,5 +1,4 @@
 // ignore_for_file: avoid_types_as_parameter_names, duplicate_ignore
-
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
@@ -11,10 +10,12 @@ import 'package:flutter/services.dart';
 class NhanDienTab extends StatefulWidget {
   final ValueNotifier<String?> recognizedLanguage;
   final ValueNotifier<String?> recognizedContent;
+  final ValueNotifier<String?> recognizedModel;
   const NhanDienTab({
     super.key,
     required this.recognizedLanguage,
     required this.recognizedContent,
+    required this.recognizedModel,
   });
 
   @override
@@ -26,12 +27,14 @@ class NoteEntry {
   final String data;
   final String language;
   final DateTime timestamp;
+  final String modelname;
 
   NoteEntry({
     required this.source,
     required this.language,
     required this.data,
     required this.timestamp,
+    required this.modelname,
   });
 
   @override
@@ -40,7 +43,7 @@ class NoteEntry {
         '${timestamp.hour.toString().padLeft(2, '0')}:'
         '${timestamp.minute.toString().padLeft(2, '0')}:'
         '${timestamp.second.toString().padLeft(2, '0')}';
-    return '[$source] - [$language]\n[$formattedTime]: $data';
+    return '[$source] - [$language]\n[$formattedTime][Model: $modelname]: $data';
   }
 }
 
@@ -50,6 +53,7 @@ class NhanDienTabState extends State<NhanDienTab>
   late final DatabaseReference _languageRef;
   late final DatabaseReference _noteRef;
   late final DatabaseReference _deviceRef;
+  late final DatabaseReference _modelRef;
   final ScrollController _scrollController = ScrollController();
   StreamSubscription? _noteSub;
   bool _isListeningToApi = false;
@@ -70,6 +74,7 @@ class NhanDienTabState extends State<NhanDienTab>
     _languageRef = FirebaseDatabase.instance.ref("Results/language");
     _noteRef = FirebaseDatabase.instance.ref("Results/text");
     _deviceRef = FirebaseDatabase.instance.ref("Results/device");
+    _modelRef = FirebaseDatabase.instance.ref("Results/model");
 
     _controller = AnimationController(
       vsync: this,
@@ -117,6 +122,7 @@ class NhanDienTabState extends State<NhanDienTab>
                   source: data['source'] ?? '',
                   language: data['language'] ?? '',
                   data: data['text'] ?? '',
+                  modelname: data['model'] ?? '',
                   timestamp:
                       (data['timestamp'] as Timestamp?)?.toDate() ??
                       DateTime.now(),
@@ -159,7 +165,8 @@ class NhanDienTabState extends State<NhanDienTab>
         final displayLanguage = _mapLanguage(language);
         final deviceSnapshot = await _deviceRef.get();
         final source = deviceSnapshot.value?.toString() ?? 'unknown';
-
+        final modelSnapshot = await _modelRef.get();
+        final modelname = modelSnapshot.value?.toString() ?? 'unknown';
         // Cắt bớt nội dung nếu vượt quá _maxNoteLength
         String trimmedData = data!;
         if (trimmedData.length > _maxNoteLength) {
@@ -176,6 +183,7 @@ class NhanDienTabState extends State<NhanDienTab>
           language: displayLanguage,
           data: trimmedData,
           timestamp: DateTime.now(),
+          modelname: modelname,
         );
 
         await _appendNoteToFirestore(
@@ -183,6 +191,7 @@ class NhanDienTabState extends State<NhanDienTab>
           source: source,
           language: displayLanguage,
           timestamp: noteEntry.timestamp,
+          modelname: modelname,
         );
 
         if (mounted) {
@@ -217,15 +226,18 @@ class NhanDienTabState extends State<NhanDienTab>
   }
 
   void _onLanguageOrContentChanged() async {
-    final language = widget.recognizedLanguage.value?.toLowerCase().trim() ?? '';
+    final language =
+        widget.recognizedLanguage.value?.toLowerCase().trim() ?? '';
     final displayLanguage = _mapLanguage(language);
     final user = FirebaseAuth.instance.currentUser;
-    final snapshot = await FirebaseFirestore.instance
-        .collection('User_Information')
-        .doc(user?.uid)
-        .get();
+    final snapshot =
+        await FirebaseFirestore.instance
+            .collection('User_Information')
+            .doc(user?.uid)
+            .get();
     final username = snapshot.data()?['Username'] ?? 'unknown';
     String? content = widget.recognizedContent.value;
+    String? namemodel = widget.recognizedModel.value;
 
     if ((language.isNotEmpty) && (content?.isNotEmpty ?? false)) {
       // Cắt content nếu vượt quá giới hạn
@@ -243,6 +255,7 @@ class NhanDienTabState extends State<NhanDienTab>
         language: displayLanguage,
         data: content,
         timestamp: DateTime.now(),
+        modelname: namemodel!,
       );
 
       await _appendNoteToFirestore(
@@ -250,6 +263,7 @@ class NhanDienTabState extends State<NhanDienTab>
         source: 'User: $username',
         language: displayLanguage,
         timestamp: noteEntry.timestamp,
+        modelname: namemodel,
       );
 
       if (mounted) {
@@ -269,6 +283,7 @@ class NhanDienTabState extends State<NhanDienTab>
 
       widget.recognizedLanguage.value = null;
       widget.recognizedContent.value = null;
+      widget.recognizedModel.value = null;
     }
   }
 
@@ -277,6 +292,7 @@ class NhanDienTabState extends State<NhanDienTab>
     required String source,
     String? language,
     required DateTime timestamp,
+    required String modelname,
   }) async {
     final trimmedEntry = newEntry.trim();
     final now = DateTime.now();
@@ -308,6 +324,7 @@ class NhanDienTabState extends State<NhanDienTab>
           'source': source,
           'isUser': source.contains('User'),
           'timestamp': Timestamp.fromDate(timestamp),
+          'model': modelname,
         });
 
         _lastSavedContent = trimmedEntry;
@@ -373,40 +390,44 @@ class NhanDienTabState extends State<NhanDienTab>
   void _showChatOptionsDialog(BuildContext context, String fullText) {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("Tùy chọn"),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: SingleChildScrollView(
-            child: SelectableText.rich(
-              TextSpan(
-                style: const TextStyle(fontSize: 16, color: Colors.black),
-                children: _buildStyledNoteTextSpans(fullText),
+      builder:
+          (context) => AlertDialog(
+            title: const Text("Tùy chọn"),
+            content: SizedBox(
+              width: double.maxFinite,
+              child: SingleChildScrollView(
+                child: SelectableText.rich(
+                  TextSpan(
+                    style: const TextStyle(fontSize: 16, color: Colors.black),
+                    children: _buildStyledNoteTextSpans(fullText),
+                  ),
+                ),
               ),
             ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text("Cancel"),
+              ),
+              TextButton(
+                onPressed: () {
+                  Clipboard.setData(ClipboardData(text: fullText));
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(
+                    context,
+                  ).showSnackBar(const SnackBar(content: Text("Đã sao chép")));
+                },
+                child: const Text("Copy"),
+              ),
+              TextButton(
+                onPressed: () => _handleDelete(context, fullText),
+                child: const Text(
+                  "Delete",
+                  style: TextStyle(color: Colors.red),
+                ),
+              ),
+            ],
           ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text("Cancel"),
-          ),
-          TextButton(
-            onPressed: () {
-              Clipboard.setData(ClipboardData(text: fullText));
-              Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text("Đã sao chép")),
-              );
-            },
-            child: const Text("Copy"),
-          ),
-          TextButton(
-            onPressed: () => _handleDelete(context, fullText),
-            child: const Text("Delete", style: TextStyle(color: Colors.red)),
-          ),
-        ],
-      ),
     );
   }
 
@@ -414,18 +435,20 @@ class NhanDienTabState extends State<NhanDienTab>
     final deleted = await _deleteNoteEntryByText(fullText);
     if (deleted) {
       setState(() {
-        _noteEntries.removeWhere((note) => note.toString().trim() == fullText.trim());
+        _noteEntries.removeWhere(
+          (note) => note.toString().trim() == fullText.trim(),
+        );
       });
 
       Navigator.pop(context);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Xóa thành công")),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text("Xóa thành công")));
     } else {
       Navigator.pop(context);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Không thể xóa")),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text("Không thể xóa")));
     }
   }
 
@@ -433,7 +456,10 @@ class NhanDienTabState extends State<NhanDienTab>
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return false;
     // Regex để tách [source] - [language]\n[00:00:00]: nội dung
-    final regex = RegExp(r'^\[(.*?)\] - \[(.*?)\]\n\[\d{2}:\d{2}:\d{2}\]: (.*)$', dotAll: true);
+    final regex = RegExp(
+      r'^\[(.*?)\] - \[(.*?)\]\n\[\d{2}:\d{2}:\d{2}\]: (.*)$',
+      dotAll: true,
+    );
     final match = regex.firstMatch(fullText.trim());
     if (match == null) return false;
 
@@ -443,14 +469,15 @@ class NhanDienTabState extends State<NhanDienTab>
 
     if (data == null) return false;
 
-    final snapshot = await FirebaseFirestore.instance
-        .collection("User_Information")
-        .doc(uid)
-        .collection("Content_History")
-        .where("text", isEqualTo: data)
-        .where("language", isEqualTo: language)
-        .limit(1)
-        .get();
+    final snapshot =
+        await FirebaseFirestore.instance
+            .collection("User_Information")
+            .doc(uid)
+            .collection("Content_History")
+            .where("text", isEqualTo: data)
+            .where("language", isEqualTo: language)
+            .limit(1)
+            .get();
 
     if (snapshot.docs.isNotEmpty) {
       await snapshot.docs.first.reference.delete();
@@ -464,10 +491,12 @@ class NhanDienTabState extends State<NhanDienTab>
     final lines = text.trim().split('\n');
     List<TextSpan> spans = [];
 
-    for (final line in lines) {
-      final metaRegex = RegExp(r'^\[(.*?)\] - \[(.*?)\]$');
-      final timeRegex = RegExp(r'^\[(\d{2}:\d{2}:\d{2})\]:(.*)$');
+    final metaRegex = RegExp(r'^\[(.*?)\] - \[(.*?)\]$');
+    final timeRegex = RegExp(r'^\[(\d{2}:\d{2}:\d{2})\]:(.*)$');
+    final modelTimeRegex =
+        RegExp(r'^\[(\d{2}:\d{2}:\d{2})\]\s*\["?Model:\s*(.*?)"?\]\s*:(.*)$');
 
+    for (final line in lines) {
       if (metaRegex.hasMatch(line)) {
         final match = metaRegex.firstMatch(line)!;
         final source = match.group(1)!;
@@ -479,7 +508,10 @@ class NhanDienTabState extends State<NhanDienTab>
             children: [
               TextSpan(
                 text: '[$source] - ',
-                style: TextStyle(fontWeight: FontWeight.bold, color: sourceColor),
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: sourceColor,
+                ),
               ),
               TextSpan(
                 text: '[$language]\n',
@@ -487,6 +519,36 @@ class NhanDienTabState extends State<NhanDienTab>
                   fontWeight: FontWeight.bold,
                   color: Colors.deepPurple,
                 ),
+              ),
+            ],
+          ),
+        );
+      } else if (modelTimeRegex.hasMatch(line)) {
+        final match = modelTimeRegex.firstMatch(line)!;
+        final time = match.group(1)!;
+        final model = match.group(2)!;
+        final content = match.group(3)!.trim();
+
+        spans.add(
+          TextSpan(
+            children: [
+              TextSpan(
+                text: '[$time] ',
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: Colors.green,
+                ),
+              ),
+              TextSpan(
+                text: '[Model: $model] ',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: Colors.orange,
+                ),
+              ),
+              TextSpan(
+                text: ': $content',
+                style: const TextStyle(color: Colors.black),
               ),
             ],
           ),
@@ -514,13 +576,14 @@ class NhanDienTabState extends State<NhanDienTab>
           ),
         );
       } else {
-        spans.add(TextSpan(
-          text: '$line\n',
-          style: const TextStyle(color: Colors.black),
-        ));
+        spans.add(
+          TextSpan(
+            text: '$line\n',
+            style: const TextStyle(color: Colors.black),
+          ),
+        );
       }
     }
-
     return spans;
   }
 
@@ -539,7 +602,11 @@ class NhanDienTabState extends State<NhanDienTab>
             children: [
               const Text(
                 "📝 Nội dung",
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black),
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.black,
+                ),
               ),
               const Spacer(),
               IconButton(
@@ -548,20 +615,26 @@ class NhanDienTabState extends State<NhanDienTab>
                 onPressed: () async {
                   final confirm = await showDialog<bool>(
                     context: context,
-                    builder: (context) => AlertDialog(
-                      title: const Text("Xác nhận xoá"),
-                      content: const Text("Bạn có chắc muốn xoá toàn bộ nội dung không?"),
-                      actions: [
-                        TextButton(
-                          onPressed: () => Navigator.pop(context, false),
-                          child: const Text("Huỷ"),
+                    builder:
+                        (context) => AlertDialog(
+                          title: const Text("Xác nhận xoá"),
+                          content: const Text(
+                            "Bạn có chắc muốn xoá toàn bộ nội dung không?",
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(context, false),
+                              child: const Text("Huỷ"),
+                            ),
+                            TextButton(
+                              onPressed: () => Navigator.pop(context, true),
+                              child: const Text(
+                                "Xoá",
+                                style: TextStyle(color: Colors.red),
+                              ),
+                            ),
+                          ],
                         ),
-                        TextButton(
-                          onPressed: () => Navigator.pop(context, true),
-                          child: const Text("Xoá", style: TextStyle(color: Colors.red)),
-                        ),
-                      ],
-                    ),
                   );
 
                   if (confirm == true) {
@@ -600,8 +673,7 @@ class NhanDienTabState extends State<NhanDienTab>
                     return Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        if (groupIndex != 0)
-                          const SizedBox(height: 14),
+                        if (groupIndex != 0) const SizedBox(height: 14),
                         Center(
                           child: Text(
                             'Ngày $date',
@@ -613,29 +685,37 @@ class NhanDienTabState extends State<NhanDienTab>
                           ),
                         ),
                         const SizedBox(height: 6),
-                        ...notes.map(
-                        (note) {
+                        ...notes.map((note) {
                           final fullText = note.toString();
                           return Padding(
                             padding: const EdgeInsets.only(bottom: 8),
-                            child: Material( // Bọc Material để dùng InkWell
+                            child: Material(
+                              // Bọc Material để dùng InkWell
                               color: Colors.transparent,
                               child: InkWell(
-                                onLongPress: () => _showChatOptionsDialog(context, fullText),
+                                onLongPress:
+                                    () => _showChatOptionsDialog(
+                                      context,
+                                      fullText,
+                                    ),
                                 child: AbsorbPointer(
                                   absorbing: true,
                                   child: SelectableText.rich(
                                     TextSpan(
-                                      style: const TextStyle(fontSize: 16, color: Colors.black),
-                                      children: _buildStyledNoteTextSpans(fullText),
+                                      style: const TextStyle(
+                                        fontSize: 16,
+                                        color: Colors.black,
+                                      ),
+                                      children: _buildStyledNoteTextSpans(
+                                        fullText,
+                                      ),
                                     ),
                                   ),
                                 ),
                               ),
                             ),
                           );
-                        },
-                      ),
+                        }),
                       ],
                     );
                   },

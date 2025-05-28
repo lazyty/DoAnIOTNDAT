@@ -17,11 +17,13 @@ import 'package:uuid/uuid.dart';
 class GhiAmTab extends StatefulWidget {
   final ValueNotifier<String?> recognizedLanguage;
   final ValueNotifier<String?> recognizedContent;
+  final ValueNotifier<String?> recognizedModel;
   final VoidCallback? onUploadSuccess;
   const GhiAmTab({
     super.key,
     required this.recognizedLanguage,
     required this.recognizedContent,
+    required this.recognizedModel,
     this.onUploadSuccess,
   });
 

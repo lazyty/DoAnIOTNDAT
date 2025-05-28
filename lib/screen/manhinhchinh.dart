@@ -4,7 +4,7 @@ import 'package:iotwsra/components/theme_provider.dart';
 import 'package:provider/provider.dart';
 import 'tabnhandien.dart';
 import 'tabghiam.dart';
-import '../components/background.dart'; // thêm để dùng nền sáng
+import '../components/background.dart';
 
 class ManHinhChinhScreen extends StatefulWidget {
   const ManHinhChinhScreen({super.key});
@@ -19,6 +19,7 @@ class _ManHinhChinhScreenState extends State<ManHinhChinhScreen>
     null,
   );
   final ValueNotifier<String?> recognizedContent = ValueNotifier<String?>(null);
+  final ValueNotifier<String?> recognizedModel = ValueNotifier<String?>(null);
   final GlobalKey<NhanDienTabState> _nhanDienTabKey =
       GlobalKey<NhanDienTabState>();
 
@@ -91,37 +92,43 @@ class _ManHinhChinhScreenState extends State<ManHinhChinhScreen>
                             TextButton(
                               style: TextButton.styleFrom(
                                 foregroundColor: Colors.grey,
-                                backgroundColor:  Colors.grey.withOpacity(0.1),
-                                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                                backgroundColor: Colors.grey.withOpacity(0.1),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 20,
+                                  vertical: 10,
+                                ),
                                 shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
                               ),
-                            ),
                               onPressed: () => Navigator.pop(context, false),
                               child: const Text('Hủy'),
                             ),
                             TextButton(
                               style: TextButton.styleFrom(
-                              foregroundColor: Colors.white,
-                              backgroundColor: Colors.red,
-                              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                              shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8),
-                              ),
+                                foregroundColor: Colors.white,
+                                backgroundColor: Colors.red,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 20,
+                                  vertical: 10,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
                               ),
                               onPressed: () => Navigator.pop(context, true),
                               child: const Text('Đăng xuất'),
                             ),
                           ],
                         ),
-                      );
-                    if (shouldLogout == true) {
-                      await FirebaseAuth.instance.signOut();
-                      Navigator.pushNamedAndRemoveUntil(
-                        context,
-                        '/login',
-                        (route) => false,
-                      );
+                  );
+                  if (shouldLogout == true) {
+                    await FirebaseAuth.instance.signOut();
+                    Navigator.pushNamedAndRemoveUntil(
+                      context,
+                      '/login',
+                      (route) => false,
+                    );
                   }
                 },
               ),
@@ -141,15 +148,23 @@ class _ManHinhChinhScreenState extends State<ManHinhChinhScreen>
         Expanded(
           child: TabBarView(
             children: [
-              NhanDienTab(key: _nhanDienTabKey,recognizedLanguage: recognizedLanguage, recognizedContent: recognizedContent,),
-              GhiAmTab(recognizedLanguage: recognizedLanguage, recognizedContent: recognizedContent,
-              onUploadSuccess: () {
-                _nhanDienTabKey.currentState?.startListeningFromUpload();
+              NhanDienTab(
+                key: _nhanDienTabKey,
+                recognizedLanguage: recognizedLanguage,
+                recognizedContent: recognizedContent,
+                recognizedModel: recognizedModel,
+              ),
+              GhiAmTab(
+                recognizedLanguage: recognizedLanguage,
+                recognizedContent: recognizedContent,
+                recognizedModel: recognizedModel,
+                onUploadSuccess: () {
+                  _nhanDienTabKey.currentState?.startListeningFromUpload();
                 },
               ),
             ],
           ),
-        )
+        ),
       ],
     );
 
