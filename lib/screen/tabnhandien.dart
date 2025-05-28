@@ -1,12 +1,12 @@
+// ignore_for_file: avoid_types_as_parameter_names, duplicate_ignore
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'dart:async';
-import 'package:flutter_svg/flutter_svg.dart';
-import 'dart:math';
-import 'package:iotwsra/screen/wave_painter.dart';
+import 'package:flutter/services.dart';
 
 class NhanDienTab extends StatefulWidget {
   final ValueNotifier<String?> recognizedLanguage;
@@ -25,12 +25,22 @@ class NoteEntry {
   final String source;
   final String data;
   final String language;
+  final DateTime timestamp;
 
-  NoteEntry({required this.source, required this.language, required this.data});
+  NoteEntry({
+    required this.source,
+    required this.language,
+    required this.data,
+    required this.timestamp,
+  });
 
   @override
   String toString() {
-    return '[$source] - [$language]:\n  $data';
+    final formattedTime =
+        '${timestamp.hour.toString().padLeft(2, '0')}:'
+        '${timestamp.minute.toString().padLeft(2, '0')}:'
+        '${timestamp.second.toString().padLeft(2, '0')}';
+    return '[$source] - [$language]\n[$formattedTime]: $data';
   }
 }
 
@@ -40,20 +50,16 @@ class NhanDienTabState extends State<NhanDienTab>
   late final DatabaseReference _languageRef;
   late final DatabaseReference _noteRef;
   late final DatabaseReference _deviceRef;
-  late final TextEditingController _noteController;
   final ScrollController _scrollController = ScrollController();
-  StreamSubscription? _languageSub;
   StreamSubscription? _noteSub;
+  bool _isListeningToApi = false;
 
-  String? _currentLanguage;
-  String? _noteContent;
-  // ignore: unused_field
-  bool _dataLoading = true;
   String? _lastSavedContent;
   DateTime? _lastSavedTime;
   bool _isSaving = false;
+  List<NoteEntry> _noteEntries = [];
 
-  static const int _maxNoteLength = 500000;
+  static const int _maxNoteLength = 30000;
 
   @override
   bool get wantKeepAlive => true;
@@ -61,7 +67,6 @@ class NhanDienTabState extends State<NhanDienTab>
   @override
   void initState() {
     super.initState();
-    _noteController = TextEditingController();
     _languageRef = FirebaseDatabase.instance.ref("Results/language");
     _noteRef = FirebaseDatabase.instance.ref("Results/text");
     _deviceRef = FirebaseDatabase.instance.ref("Results/device");
@@ -71,26 +76,10 @@ class NhanDienTabState extends State<NhanDienTab>
       duration: const Duration(seconds: 2),
     )..repeat();
 
-    _languageSub = _languageRef.onValue.listen((event) {
-      final data = event.snapshot.value?.toString();
-      if (data?.isNotEmpty ?? false) {
-        setState(() {
-          _currentLanguage = _mapLanguage(data!);
-          _dataLoading = false;
-        });
-      }
-    });
-    // Bước 1: Tải dữ liệu từ Firestore trước
     _loadNotesFromFirestore().then((_) {
-      // Bước 2: Bắt đầu lắng nghe dữ liệu mới
       _startListeningToRealtimeDatabase();
     });
-    // Fallback nếu sau 5s chưa có ngôn ngữ
-    Future.delayed(const Duration(seconds: 5), () {
-      if (_currentLanguage == null) {
-        setState(() => _dataLoading = true);
-      }
-    });
+
     widget.recognizedLanguage.addListener(_onLanguageOrContentChanged);
     widget.recognizedContent.addListener(_onLanguageOrContentChanged);
   }
@@ -98,9 +87,7 @@ class NhanDienTabState extends State<NhanDienTab>
   @override
   void dispose() {
     _controller.dispose();
-    _languageSub?.cancel();
     _noteSub?.cancel();
-    _noteController.dispose();
     _scrollController.dispose();
     widget.recognizedLanguage.removeListener(_onLanguageOrContentChanged);
     widget.recognizedContent.removeListener(_onLanguageOrContentChanged);
@@ -126,17 +113,28 @@ class NhanDienTabState extends State<NhanDienTab>
           final entries =
               contentHistorySnapshot.docs.map((doc) {
                 final data = doc.data();
-                final text = data['text'] ?? '';
-                final source = data['source'] ?? '';
-                final language = data['language'] ?? '';
-                return '[$source] - [$language]:\n  $text';
+                return NoteEntry(
+                  source: data['source'] ?? '',
+                  language: data['language'] ?? '',
+                  data: data['text'] ?? '',
+                  timestamp:
+                      (data['timestamp'] as Timestamp?)?.toDate() ??
+                      DateTime.now(),
+                );
               }).toList();
 
-          final combinedText = entries.join('\n');
-
           setState(() {
-            _noteController.text = combinedText;
-            _noteContent = combinedText;
+            _noteEntries = entries;
+          });
+
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (_scrollController.hasClients) {
+              _scrollController.animateTo(
+                _scrollController.position.maxScrollExtent,
+                duration: const Duration(milliseconds: 300),
+                curve: Curves.easeOut,
+              );
+            }
           });
         } else {
           debugPrint(
@@ -162,38 +160,34 @@ class NhanDienTabState extends State<NhanDienTab>
         final deviceSnapshot = await _deviceRef.get();
         final source = deviceSnapshot.value?.toString() ?? 'unknown';
 
+        // Cắt bớt nội dung nếu vượt quá _maxNoteLength
+        String trimmedData = data!;
+        if (trimmedData.length > _maxNoteLength) {
+          trimmedData = '${trimmedData.substring(0, _maxNoteLength - 3)}...';
+          if (kDebugMode) {
+            debugPrint(
+              '🔴 Ghi chú quá dài (${data.length} ký tự), đã cắt xuống còn $_maxNoteLength ký tự.',
+            );
+          }
+        }
+
         final noteEntry = NoteEntry(
           source: source,
           language: displayLanguage,
-          data: data!,
+          data: trimmedData,
+          timestamp: DateTime.now(),
         );
-        final current = _noteController.text;
-        final updatedText = current.isEmpty
-            ? noteEntry.toString()
-            : '$current\n${noteEntry.toString()}';
 
-        if (updatedText.length > _maxNoteLength) {
-          if (kDebugMode) {
-            debugPrint('🔴 Vượt quá giới hạn ký tự cho phép ($_maxNoteLength ký tự)');
-          }
-          await _noteRef.set(''); // reset dù bị lỗi
-          return; // bỏ qua cập nhật
-        }
-        _noteContent = updatedText;
-
-        // Lưu với source lấy từ _deviceRef
         await _appendNoteToFirestore(
-          data,
+          trimmedData,
           source: source,
           language: displayLanguage,
+          timestamp: noteEntry.timestamp,
         );
 
         if (mounted) {
           setState(() {
-            _noteController.text = _noteContent!;
-            _noteController.selection = TextSelection.fromPosition(
-              TextPosition(offset: _noteController.text.length),
-            );
+            _noteEntries.add(noteEntry);
           });
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (_scrollController.hasClients) {
@@ -216,54 +210,51 @@ class NhanDienTabState extends State<NhanDienTab>
   }
 
   void _startListeningToApiResult() {
-    widget.recognizedLanguage.addListener(_onLanguageOrContentChanged);
+    if (!_isListeningToApi) {
+      widget.recognizedLanguage.addListener(_onLanguageOrContentChanged);
+      _isListeningToApi = true;
+    }
   }
 
   void _onLanguageOrContentChanged() async {
     final language = widget.recognizedLanguage.value?.toLowerCase().trim() ?? '';
     final displayLanguage = _mapLanguage(language);
-        final user = FirebaseAuth.instance.currentUser;
-        final snapshot =
-        await FirebaseFirestore.instance
-            .collection('User_Information')
-            .doc(user?.uid)
-            .get();
+    final user = FirebaseAuth.instance.currentUser;
+    final snapshot = await FirebaseFirestore.instance
+        .collection('User_Information')
+        .doc(user?.uid)
+        .get();
     final username = snapshot.data()?['Username'] ?? 'unknown';
-    final content = widget.recognizedContent.value;
+    String? content = widget.recognizedContent.value;
 
     if ((language.isNotEmpty) && (content?.isNotEmpty ?? false)) {
+      // Cắt content nếu vượt quá giới hạn
+      if (content!.length > _maxNoteLength) {
+        content = '${content.substring(0, _maxNoteLength - 3)}...';
+        if (kDebugMode) {
+          debugPrint(
+            '🔴 Nội dung quá dài (${content.length} ký tự), đã rút gọn còn $_maxNoteLength ký tự.',
+          );
+        }
+      }
+
       final noteEntry = NoteEntry(
         source: 'User: $username',
         language: displayLanguage,
-        data: content ?? '',
+        data: content,
+        timestamp: DateTime.now(),
       );
 
-      final current = _noteController.text;
-      final updatedText = current.isEmpty
-          ? noteEntry.toString()
-          : '$current\n${noteEntry.toString()}';
-
-        if (updatedText.length > _maxNoteLength) {
-          if (kDebugMode) {
-            debugPrint('🔴 Vượt quá giới hạn ký tự cho phép ($_maxNoteLength ký tự)');
-          }
-          await _noteRef.set(''); // reset dù bị lỗi
-          return; // bỏ qua cập nhật
-        }
-        _noteContent = updatedText;
-        
       await _appendNoteToFirestore(
-        content ?? '',
+        content,
         source: 'User: $username',
         language: displayLanguage,
+        timestamp: noteEntry.timestamp,
       );
 
       if (mounted) {
         setState(() {
-          _noteController.text = _noteContent!;
-          _noteController.selection = TextSelection.fromPosition(
-            TextPosition(offset: _noteController.text.length),
-          );
+          _noteEntries.add(noteEntry);
         });
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (_scrollController.hasClients) {
@@ -275,70 +266,76 @@ class NhanDienTabState extends State<NhanDienTab>
           }
         });
       }
+
       widget.recognizedLanguage.value = null;
       widget.recognizedContent.value = null;
     }
   }
 
- Future<void> _appendNoteToFirestore(
-  String newEntry, {
-  required String source,
-  String? language,
-}) async {
-  final trimmedEntry = newEntry.trim();
-  final now = DateTime.now();
+  Future<void> _appendNoteToFirestore(
+    String newEntry, {
+    required String source,
+    String? language,
+    required DateTime timestamp,
+  }) async {
+    final trimmedEntry = newEntry.trim();
+    final now = DateTime.now();
 
-  // Nếu đang lưu hoặc dữ liệu trùng trong 5 giây → bỏ qua
-  if (_isSaving ||
-      (_lastSavedContent == trimmedEntry &&
-       _lastSavedTime != null &&
-       now.difference(_lastSavedTime!).inSeconds < 5)) {
-    if (kDebugMode) print('Bỏ qua lưu vì trùng hoặc đang xử lý');
-    return;
-  }
+    if (_isSaving ||
+        (_lastSavedContent == trimmedEntry &&
+            _lastSavedTime != null &&
+            now.difference(_lastSavedTime!).inSeconds < 5)) {
+      if (kDebugMode) print('Bỏ qua lưu vì trùng hoặc đang xử lý');
+      return;
+    }
 
-  _isSaving = true;
+    _isSaving = true;
 
-  final user = FirebaseAuth.instance.currentUser;
-  final uid = user?.uid;
+    final user = FirebaseAuth.instance.currentUser;
+    final uid = user?.uid;
 
-  if (uid != null) {
-    try {
-      final firestore = FirebaseFirestore.instance;
-      final docRef = firestore
-          .collection('User_Information')
-          .doc(uid)
-          .collection('Content_History');
+    if (uid != null) {
+      try {
+        final firestore = FirebaseFirestore.instance;
+        final docRef = firestore
+            .collection('User_Information')
+            .doc(uid)
+            .collection('Content_History');
 
-      final userDoc = await firestore
-          .collection('User_Information')
-          .doc(uid)
-          .get();
+        await docRef.add({
+          'text': trimmedEntry,
+          'language': language ?? '',
+          'source': source,
+          'isUser': source.contains('User'),
+          'timestamp': Timestamp.fromDate(timestamp),
+        });
 
-      final username = userDoc.data()?['Username'] ?? 'unknown';
-
-      await docRef.add({
-        'text': trimmedEntry,
-        'language': language ?? '',
-        'source': source,
-        'isUser': source == username,
-        'timestamp': Timestamp.now(),
-      });
-
-      // Cập nhật nội dung & thời gian lần lưu gần nhất
-      _lastSavedContent = trimmedEntry;
-      _lastSavedTime = now;
-
-    } catch (e) {
-      if (kDebugMode) print("Lỗi khi thêm entry vào Firestore: $e");
-    } finally {
+        _lastSavedContent = trimmedEntry;
+        _lastSavedTime = now;
+      } catch (e) {
+        if (kDebugMode) print("Lỗi khi thêm entry vào Firestore: $e");
+      } finally {
+        _isSaving = false;
+      }
+    } else {
       _isSaving = false;
     }
-  } else {
-    _isSaving = false;
   }
-}
 
+  List<Map<String, dynamic>> _groupNotesByDate(List<NoteEntry> notes) {
+    final Map<String, List<NoteEntry>> groupedNotes = {};
+    for (var note in notes) {
+      final dateKey =
+          '${note.timestamp.day}/${note.timestamp.month}/${note.timestamp.year}';
+      if (!groupedNotes.containsKey(dateKey)) {
+        groupedNotes[dateKey] = [];
+      }
+      groupedNotes[dateKey]!.add(note);
+    }
+    return groupedNotes.entries.map((entry) {
+      return {'date': entry.key, 'notes': entry.value};
+    }).toList();
+  }
 
   String _mapLanguage(String language) {
     const languageMap = {
@@ -362,129 +359,294 @@ class NhanDienTabState extends State<NhanDienTab>
     if (user == null) return;
 
     final userDocId = user.uid;
-
     final historyCollection = FirebaseFirestore.instance
         .collection('User_Information')
         .doc(userDocId)
         .collection('Content_History');
 
     final snapshot = await historyCollection.get();
-
     for (final doc in snapshot.docs) {
       await doc.reference.delete();
     }
   }
 
-    List<TextSpan> _buildStyledNoteTextSpans(String text) {
-    final lines = text.trim().split('\n');
-    return lines.map((line) {
-      final regex = RegExp(r'^\[(.*?)\] - \[(.*?)\]:(.*)$');
-      final match = regex.firstMatch(line);
-      if (match != null) {
-        final source = match.group(1)!;
-        final language = match.group(2)!;
-        final content = match.group(3)!.trim();
-        final sourceColor = source == 'User' ? Colors.red : Colors.blue;
-        return TextSpan(
-          children: [
-            TextSpan(
-              text: '[$source]',
-              style: TextStyle(fontWeight: FontWeight.bold, color: sourceColor),
-            ),
-            const TextSpan(text: ' - ',style: TextStyle(fontWeight: FontWeight.bold),),
-            TextSpan(
-              text: '[$language]',
-              style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.deepPurple),
-            ),
-            TextSpan(
-              text: '$content\n',
-              style: const TextStyle(fontWeight: FontWeight.normal),
-            ),
-          ],
-        );
-      } else {
-        return TextSpan(text: '$line\n');
-      }
-    }).toList();
-  }
-
-Widget _buildContentField(double width, double height) {
-  return Container(
-    margin: const EdgeInsets.only(top: 3),
-    padding: const EdgeInsets.all(10),
-    decoration: _boxDecoration(),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            const Text(
-              "📝 Nội dung",
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-            ),
-            const Spacer(),
-            IconButton(
-              icon: const Icon(Icons.clear, color: Colors.red),
-              tooltip: "Xoá toàn bộ khung nội dung",
-              onPressed: () async {
-                final confirm = await showDialog<bool>(
-                  context: context,
-                  builder: (context) => AlertDialog(
-                    title: const Text("Xác nhận xoá"),
-                    content: const Text("Bạn có chắc muốn xoá toàn bộ nội dung không?"),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.pop(context, false),
-                        child: const Text("Huỷ"),
-                      ),
-                      TextButton(
-                        onPressed: () => Navigator.pop(context, true),
-                        child: const Text("Xoá", style: TextStyle(color: Colors.red)),
-                      ),
-                    ],
-                  ),
-                );
-                if (confirm == true) {
-                  setState(() {
-                    _noteController.clear();
-                    _noteContent = '';
-                  });
-                  await _clearContentHistoryForCurrentUser();
-                }
-              },
-            ),
-          ],
-        ),
-        SizedBox(
-          width: width,
-          height: height * 0.65,
-          child: Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              border: Border.all(color: Colors.grey, width: 1.2),
-              borderRadius: BorderRadius.circular(8),
-              color: Colors.white,
-            ),
-            child: Scrollbar(
-              thumbVisibility: true,
-              controller: _scrollController,
-              child: SingleChildScrollView(
-                controller: _scrollController,
-                child: SelectableText.rich(
-                  TextSpan(
-                    children: _buildStyledNoteTextSpans(_noteController.text),
-                  ),
-                  textAlign: TextAlign.start,
-                  style: const TextStyle(fontSize: 16, color: Colors.black),
-                ),
+  void _showChatOptionsDialog(BuildContext context, String fullText) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Tùy chọn"),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: SingleChildScrollView(
+            child: SelectableText.rich(
+              TextSpan(
+                style: const TextStyle(fontSize: 16, color: Colors.black),
+                children: _buildStyledNoteTextSpans(fullText),
               ),
             ),
           ),
         ),
-      ],
-    ),
-  );
-}
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("Cancel"),
+          ),
+          TextButton(
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: fullText));
+              Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text("Đã sao chép")),
+              );
+            },
+            child: const Text("Copy"),
+          ),
+          TextButton(
+            onPressed: () => _handleDelete(context, fullText),
+            child: const Text("Delete", style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _handleDelete(BuildContext context, String fullText) async {
+    final deleted = await _deleteNoteEntryByText(fullText);
+    if (deleted) {
+      setState(() {
+        _noteEntries.removeWhere((note) => note.toString().trim() == fullText.trim());
+      });
+
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Xóa thành công")),
+      );
+    } else {
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Không thể xóa")),
+      );
+    }
+  }
+
+  Future<bool> _deleteNoteEntryByText(String fullText) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return false;
+    // Regex để tách [source] - [language]\n[00:00:00]: nội dung
+    final regex = RegExp(r'^\[(.*?)\] - \[(.*?)\]\n\[\d{2}:\d{2}:\d{2}\]: (.*)$', dotAll: true);
+    final match = regex.firstMatch(fullText.trim());
+    if (match == null) return false;
+
+    final source = match.group(1);
+    final language = match.group(2);
+    final data = match.group(3)?.trim();
+
+    if (data == null) return false;
+
+    final snapshot = await FirebaseFirestore.instance
+        .collection("User_Information")
+        .doc(uid)
+        .collection("Content_History")
+        .where("text", isEqualTo: data)
+        .where("language", isEqualTo: language)
+        .limit(1)
+        .get();
+
+    if (snapshot.docs.isNotEmpty) {
+      await snapshot.docs.first.reference.delete();
+      return true;
+    }
+
+    return false;
+  }
+
+  List<TextSpan> _buildStyledNoteTextSpans(String text) {
+    final lines = text.trim().split('\n');
+    List<TextSpan> spans = [];
+
+    for (final line in lines) {
+      final metaRegex = RegExp(r'^\[(.*?)\] - \[(.*?)\]$');
+      final timeRegex = RegExp(r'^\[(\d{2}:\d{2}:\d{2})\]:(.*)$');
+
+      if (metaRegex.hasMatch(line)) {
+        final match = metaRegex.firstMatch(line)!;
+        final source = match.group(1)!;
+        final language = match.group(2)!;
+        final sourceColor = source.contains('User') ? Colors.red : Colors.blue;
+
+        spans.add(
+          TextSpan(
+            children: [
+              TextSpan(
+                text: '[$source] - ',
+                style: TextStyle(fontWeight: FontWeight.bold, color: sourceColor),
+              ),
+              TextSpan(
+                text: '[$language]\n',
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: Colors.deepPurple,
+                ),
+              ),
+            ],
+          ),
+        );
+      } else if (timeRegex.hasMatch(line)) {
+        final match = timeRegex.firstMatch(line)!;
+        final time = match.group(1)!;
+        final content = match.group(2)!.trim();
+
+        spans.add(
+          TextSpan(
+            children: [
+              TextSpan(
+                text: '[$time]: ',
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: Colors.green,
+                ),
+              ),
+              TextSpan(
+                text: content,
+                style: const TextStyle(color: Colors.black),
+              ),
+            ],
+          ),
+        );
+      } else {
+        spans.add(TextSpan(
+          text: '$line\n',
+          style: const TextStyle(color: Colors.black),
+        ));
+      }
+    }
+
+    return spans;
+  }
+
+  Widget _buildContentField(double width, double height) {
+    final groupedNotes = _groupNotesByDate(_noteEntries);
+
+    return Container(
+      margin: const EdgeInsets.only(top: 3),
+      padding: const EdgeInsets.all(10),
+      decoration: _boxDecoration(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Tiêu đề và nút xoá
+          Row(
+            children: [
+              const Text(
+                "📝 Nội dung",
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black),
+              ),
+              const Spacer(),
+              IconButton(
+                icon: const Icon(Icons.clear, color: Colors.red),
+                tooltip: "Xoá toàn bộ khung nội dung",
+                onPressed: () async {
+                  final confirm = await showDialog<bool>(
+                    context: context,
+                    builder: (context) => AlertDialog(
+                      title: const Text("Xác nhận xoá"),
+                      content: const Text("Bạn có chắc muốn xoá toàn bộ nội dung không?"),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(context, false),
+                          child: const Text("Huỷ"),
+                        ),
+                        TextButton(
+                          onPressed: () => Navigator.pop(context, true),
+                          child: const Text("Xoá", style: TextStyle(color: Colors.red)),
+                        ),
+                      ],
+                    ),
+                  );
+
+                  if (confirm == true) {
+                    setState(() {
+                      _noteEntries.clear();
+                    });
+                    await _clearContentHistoryForCurrentUser();
+                  }
+                },
+              ),
+            ],
+          ),
+          // Khung hiển thị nội dung
+          SizedBox(
+            width: width,
+            height: height * 0.65,
+            child: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                border: Border.all(color: Colors.grey, width: 1.2),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Scrollbar(
+                thumbVisibility: true,
+                controller: _scrollController,
+                child: ListView.builder(
+                  controller: _scrollController,
+                  itemCount: groupedNotes.length,
+                  padding: EdgeInsets.zero,
+                  itemBuilder: (context, groupIndex) {
+                    final group = groupedNotes[groupIndex];
+                    final date = group['date'] as String;
+                    final notes = group['notes'] as List<NoteEntry>;
+
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (groupIndex != 0)
+                          const SizedBox(height: 14),
+                        Center(
+                          child: Text(
+                            'Ngày $date',
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.black,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        ...notes.map(
+                        (note) {
+                          final fullText = note.toString();
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: Material( // Bọc Material để dùng InkWell
+                              color: Colors.transparent,
+                              child: InkWell(
+                                onLongPress: () => _showChatOptionsDialog(context, fullText),
+                                child: AbsorbPointer(
+                                  absorbing: true,
+                                  child: SelectableText.rich(
+                                    TextSpan(
+                                      style: const TextStyle(fontSize: 16, color: Colors.black),
+                                      children: _buildStyledNoteTextSpans(fullText),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                      ],
+                    );
+                  },
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
   BoxDecoration _boxDecoration() => BoxDecoration(
     color: Colors.white,

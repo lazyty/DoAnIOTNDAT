@@ -1,33 +1,50 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:iotwsra/components/theme_provider.dart';
+import 'package:provider/provider.dart';
 import 'tabnhandien.dart';
 import 'tabghiam.dart';
 import '../components/background.dart'; // thêm để dùng nền sáng
 
 class ManHinhChinhScreen extends StatefulWidget {
-
   const ManHinhChinhScreen({super.key});
 
   @override
   State<ManHinhChinhScreen> createState() => _ManHinhChinhScreenState();
 }
 
-class _ManHinhChinhScreenState extends State<ManHinhChinhScreen> {
-  bool isDarkMode = false; // Mặc định chế độ tối
-  final ValueNotifier<String?> recognizedLanguage = ValueNotifier<String?>(null);
+class _ManHinhChinhScreenState extends State<ManHinhChinhScreen>
+    with SingleTickerProviderStateMixin {
+  final ValueNotifier<String?> recognizedLanguage = ValueNotifier<String?>(
+    null,
+  );
   final ValueNotifier<String?> recognizedContent = ValueNotifier<String?>(null);
-  final GlobalKey<NhanDienTabState> _nhanDienTabKey = GlobalKey<NhanDienTabState>();
+  final GlobalKey<NhanDienTabState> _nhanDienTabKey =
+      GlobalKey<NhanDienTabState>();
+
+  late final TabController _tabController;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 2, vsync: this);
+    _tabController.addListener(() {
+      setState(() {});
+    });
+  }
 
   @override
   void dispose() {
     recognizedLanguage.dispose();
     recognizedContent.dispose();
+    _tabController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     Size size = MediaQuery.of(context).size;
+    bool isDarkMode = Theme.of(context).brightness == Brightness.dark;
 
     final content = Column(
       children: [
@@ -53,16 +70,59 @@ class _ManHinhChinhScreenState extends State<ManHinhChinhScreen> {
                   color: isDarkMode ? Colors.white : Colors.black,
                 ),
                 onPressed: () {
-                  setState(() {
-                    isDarkMode = !isDarkMode;
-                  });
+                  Provider.of<ThemeProvider>(
+                    context,
+                    listen: false,
+                  ).toggleTheme();
                 },
               ),
               IconButton(
                 icon: const Icon(Icons.exit_to_app, color: Colors.red),
                 onPressed: () async {
-                  await FirebaseAuth.instance.signOut();
-                  Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);
+                  final shouldLogout = await showDialog<bool>(
+                    context: context,
+                    builder:
+                        (context) => AlertDialog(
+                          title: const Text('Xác nhận'),
+                          content: const Text(
+                            'Bạn có chắc chắn muốn đăng xuất không?',
+                          ),
+                          actions: [
+                            TextButton(
+                              style: TextButton.styleFrom(
+                                foregroundColor: Colors.grey,
+                                backgroundColor:  Colors.grey.withOpacity(0.1),
+                                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                                shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                            ),
+                              onPressed: () => Navigator.pop(context, false),
+                              child: const Text('Hủy'),
+                            ),
+                            TextButton(
+                              style: TextButton.styleFrom(
+                              foregroundColor: Colors.white,
+                              backgroundColor: Colors.red,
+                              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                              shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              ),
+                              ),
+                              onPressed: () => Navigator.pop(context, true),
+                              child: const Text('Đăng xuất'),
+                            ),
+                          ],
+                        ),
+                      );
+                    if (shouldLogout == true) {
+                      await FirebaseAuth.instance.signOut();
+                      Navigator.pushNamedAndRemoveUntil(
+                        context,
+                        '/login',
+                        (route) => false,
+                      );
+                  }
                 },
               ),
             ],
@@ -89,7 +149,7 @@ class _ManHinhChinhScreenState extends State<ManHinhChinhScreen> {
               ),
             ],
           ),
-        ),
+        )
       ],
     );
 
@@ -114,15 +174,18 @@ class _ManHinhChinhScreenState extends State<ManHinhChinhScreen> {
               Positioned(
                 bottom: 0,
                 right: 0,
-                child: Image.asset("assets/images/bottom1.png", width: size.width),
+                child: Image.asset(
+                  "assets/images/bottom1.png",
+                  width: size.width,
+                ),
               ),
               content,
             ] else ...[
               // 🌞 NỀN SÁNG như login.dart
               // Background(child: content)
               Background(
-                showIotIcon: false,          // Ẩn iot.png nếu muốn
-                showProfileImage: false,     // ⚠️ Ẩn img.png (ảnh tròn)
+                showIotIcon: false, // Ẩn iot.png nếu muốn
+                showProfileImage: false, // ⚠️ Ẩn img.png (ảnh tròn)
                 child: content,
               ),
             ],
@@ -132,5 +195,3 @@ class _ManHinhChinhScreenState extends State<ManHinhChinhScreen> {
     );
   }
 }
-
-

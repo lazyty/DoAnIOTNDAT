@@ -114,7 +114,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         .add({
           'text': 'Tài khoản đã được tạo thành công.',
           'language': '',
-          'source': 'system',
+          'source': 'System',
           'timestamp': Timestamp.now(),
           'isUser': false,
         });
