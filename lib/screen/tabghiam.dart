@@ -633,7 +633,6 @@ class _GhiAmTabState extends State<GhiAmTab>
                         ),
                       )
                       : ListView.builder(
-                        // Add key to prevent unnecessary rebuilds
                         key: const PageStorageKey('recordedList'),
                         padding: EdgeInsets.zero,
                         itemCount: _recordedFiles.length,
@@ -643,208 +642,264 @@ class _GhiAmTabState extends State<GhiAmTab>
                           final isCurrentlyPlaying =
                               isPlaying && currentlyPlayingPath == path;
 
-                          return Card(
-                            margin: const EdgeInsets.symmetric(vertical: 4),
-                            child: Padding(
-                              padding: const EdgeInsets.all(10),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(
+                          final isNewest = index == 0;
+                          final isFirstOld = index == 1;
+
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              if (isNewest)
+                                const Padding(
+                                  padding: EdgeInsets.fromLTRB(12, 12, 12, 4),
+                                  child: Text(
+                                    '📌 File vừa ghi âm',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              if (isFirstOld)
+                                const Padding(
+                                  padding: EdgeInsets.fromLTRB(
+                                    12,
+                                    20,
+                                    12,
+                                    4,
+                                  ), // khoảng cách rõ ràng
+                                  child: Text(
+                                    '🗂️ Các file ghi âm gần đây',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              Card(
+                                margin: const EdgeInsets.symmetric(
+                                  vertical: 4,
+                                  horizontal: 8,
+                                ),
+                                child: Padding(
+                                  padding: const EdgeInsets.all(10),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
-                                      Expanded(
-                                        child: Text(
-                                          name,
-                                          style: const TextStyle(
-                                            fontWeight: FontWeight.w500,
-                                          ),
-                                        ),
-                                      ),
                                       Row(
-                                        mainAxisSize: MainAxisSize.min,
                                         children: [
-                                          IconButton(
-                                            style: IconButton.styleFrom(
-                                              backgroundColor: playButtonColor
-                                                  .withOpacity(0.1),
-                                              foregroundColor: playButtonColor,
+                                          Expanded(
+                                            child: Text(
+                                              name,
+                                              style: const TextStyle(
+                                                fontWeight: FontWeight.w500,
+                                              ),
                                             ),
-                                            icon: Icon(
-                                              isCurrentlyPlaying
-                                                  ? (isPlaybackPaused
-                                                      ? Icons.play_arrow
-                                                      : Icons.pause)
-                                                  : Icons.play_arrow,
-                                            ),
-                                            onPressed: () => playAudio(path),
                                           ),
-                                          IconButton(
-                                            style: IconButton.styleFrom(
-                                              backgroundColor: uploadButtonColor
-                                                  .withOpacity(0.1),
-                                              foregroundColor:
-                                                  uploadButtonColor,
-                                            ),
-                                            icon:
-                                                uploadingFiles.contains(path)
-                                                    ? SizedBox(
-                                                      width: 24,
-                                                      height: 24,
-                                                      child: CircularProgressIndicator(
-                                                        strokeWidth: 2,
-                                                        valueColor:
-                                                            AlwaysStoppedAnimation<
-                                                              Color
-                                                            >(
-                                                              uploadButtonColor,
-                                                            ),
-                                                      ),
-                                                    )
-                                                    : const Icon(
-                                                      Icons.cloud_upload,
-                                                    ),
-                                            onPressed:
-                                                uploadingFiles.contains(path)
-                                                    ? null
-                                                    : () => uploadFile(path),
-                                          ),
-                                          IconButton(
-                                            style: IconButton.styleFrom(
-                                              backgroundColor: deleteButtonColor
-                                                  .withOpacity(0.1),
-                                              foregroundColor:
-                                                  deleteButtonColor,
-                                            ),
-                                            icon: const Icon(Icons.delete),
-                                            onPressed: () async {
-                                              // Nếu đang phát file, dừng phát âm thanh trước khi xóa
-                                              if (isPlaying &&
-                                                  currentlyPlayingPath ==
-                                                      path) {
-                                                await player.stop();
-                                                setState(() {
-                                                  isPlaying = false;
-                                                  isPlaybackPaused = false;
-                                                  currentlyPlayingPath = null;
-                                                  _currentPlaybackPosition =
-                                                      Duration.zero;
-                                                });
-                                              }
-                                              // Xác nhận và xóa file nếu người dùng đồng ý
-                                              final confirm = await showDialog<
-                                                bool
-                                              >(
-                                                context: context,
-                                                builder:
-                                                    (context) => AlertDialog(
-                                                      backgroundColor:
-                                                          Theme.of(
-                                                            context,
-                                                          ).colorScheme.surface,
-                                                      shape: RoundedRectangleBorder(
-                                                        borderRadius:
-                                                            BorderRadius.circular(
-                                                              10,
-                                                            ),
-                                                      ),
-                                                      title: Text(
-                                                        'Xóa file?',
-                                                        style: TextStyle(
-                                                          color:
+                                          Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              IconButton(
+                                                style: IconButton.styleFrom(
+                                                  backgroundColor:
+                                                      playButtonColor
+                                                          .withOpacity(0.1),
+                                                  foregroundColor:
+                                                      playButtonColor,
+                                                ),
+                                                icon: Icon(
+                                                  isCurrentlyPlaying
+                                                      ? (isPlaybackPaused
+                                                          ? Icons.play_arrow
+                                                          : Icons.pause)
+                                                      : Icons.play_arrow,
+                                                ),
+                                                onPressed:
+                                                    () => playAudio(path),
+                                              ),
+                                              IconButton(
+                                                style: IconButton.styleFrom(
+                                                  backgroundColor:
+                                                      uploadButtonColor
+                                                          .withOpacity(0.1),
+                                                  foregroundColor:
+                                                      uploadButtonColor,
+                                                ),
+                                                icon:
+                                                    uploadingFiles.contains(
+                                                          path,
+                                                        )
+                                                        ? const SizedBox(
+                                                          width: 24,
+                                                          height: 24,
+                                                          child: CircularProgressIndicator(
+                                                            strokeWidth: 2,
+                                                            valueColor:
+                                                                AlwaysStoppedAnimation<
+                                                                  Color
+                                                                >(
+                                                                  uploadButtonColor,
+                                                                ),
+                                                          ),
+                                                        )
+                                                        : const Icon(
+                                                          Icons.cloud_upload,
+                                                        ),
+                                                onPressed:
+                                                    uploadingFiles.contains(
+                                                          path,
+                                                        )
+                                                        ? null
+                                                        : () =>
+                                                            uploadFile(path),
+                                              ),
+                                              IconButton(
+                                                style: IconButton.styleFrom(
+                                                  backgroundColor:
+                                                      deleteButtonColor
+                                                          .withOpacity(0.1),
+                                                  foregroundColor:
+                                                      deleteButtonColor,
+                                                ),
+                                                icon: const Icon(Icons.delete),
+                                                onPressed: () async {
+                                                  if (isPlaying &&
+                                                      currentlyPlayingPath ==
+                                                          path) {
+                                                    await player.stop();
+                                                    setState(() {
+                                                      isPlaying = false;
+                                                      isPlaybackPaused = false;
+                                                      currentlyPlayingPath =
+                                                          null;
+                                                      _currentPlaybackPosition =
+                                                          Duration.zero;
+                                                    });
+                                                  }
+                                                  final confirm = await showDialog<
+                                                    bool
+                                                  >(
+                                                    context: context,
+                                                    builder:
+                                                        (
+                                                          context,
+                                                        ) => AlertDialog(
+                                                          backgroundColor:
                                                               Theme.of(context)
                                                                   .colorScheme
-                                                                  .onSurface,
-                                                          fontWeight:
-                                                              FontWeight.bold,
-                                                        ),
-                                                      ),
-                                                      content: Text(
-                                                        'Bạn có chắc muốn xóa "$name"?',
-                                                        style: TextStyle(
-                                                          color:
-                                                              Theme.of(context)
-                                                                  .colorScheme
-                                                                  .onSurface,
-                                                        ),
-                                                      ),
-                                                      actions: [
-                                                        TextButton(
-                                                          style: TextButton.styleFrom(
-                                                            foregroundColor:
-                                                                Colors.grey,
-                                                            backgroundColor:
-                                                                Colors.black
-                                                                    .withOpacity(
-                                                                      0.1,
+                                                                  .surface,
+                                                          shape: RoundedRectangleBorder(
+                                                            borderRadius:
+                                                                BorderRadius.circular(
+                                                                  10,
+                                                                ),
+                                                          ),
+                                                          title: Text(
+                                                            'Xóa file?',
+                                                            style: TextStyle(
+                                                              color:
+                                                                  Theme.of(
+                                                                        context,
+                                                                      )
+                                                                      .colorScheme
+                                                                      .onSurface,
+                                                              fontWeight:
+                                                                  FontWeight
+                                                                      .bold,
+                                                            ),
+                                                          ),
+                                                          content: Text(
+                                                            'Bạn có chắc muốn xóa "$name"?',
+                                                            style: TextStyle(
+                                                              color:
+                                                                  Theme.of(
+                                                                        context,
+                                                                      )
+                                                                      .colorScheme
+                                                                      .onSurface,
+                                                            ),
+                                                          ),
+                                                          actions: [
+                                                            TextButton(
+                                                              style: TextButton.styleFrom(
+                                                                foregroundColor:
+                                                                    Colors.grey,
+                                                                backgroundColor:
+                                                                    Colors.black
+                                                                        .withOpacity(
+                                                                          0.1,
+                                                                        ),
+                                                                padding:
+                                                                    const EdgeInsets.symmetric(
+                                                                      horizontal:
+                                                                          20,
+                                                                      vertical:
+                                                                          10,
                                                                     ),
-                                                            padding:
-                                                                const EdgeInsets.symmetric(
-                                                                  horizontal:
-                                                                      20,
-                                                                  vertical: 10,
+                                                                shape: RoundedRectangleBorder(
+                                                                  borderRadius:
+                                                                      BorderRadius.circular(
+                                                                        8,
+                                                                      ),
                                                                 ),
-                                                            shape: RoundedRectangleBorder(
-                                                              borderRadius:
-                                                                  BorderRadius.circular(
-                                                                    8,
-                                                                  ),
+                                                              ),
+                                                              onPressed:
+                                                                  () =>
+                                                                      Navigator.pop(
+                                                                        context,
+                                                                        false,
+                                                                      ),
+                                                              child: const Text(
+                                                                'Không',
+                                                              ),
                                                             ),
-                                                          ),
-                                                          onPressed:
-                                                              () =>
-                                                                  Navigator.pop(
-                                                                    context,
-                                                                    false,
-                                                                  ),
-                                                          child: const Text(
-                                                            'Không',
-                                                          ),
-                                                        ),
-                                                        TextButton(
-                                                          style: TextButton.styleFrom(
-                                                            foregroundColor:
-                                                                Colors.white,
-                                                            backgroundColor:
-                                                                deleteButtonColor,
-                                                            padding:
-                                                                const EdgeInsets.symmetric(
-                                                                  horizontal:
-                                                                      20,
-                                                                  vertical: 10,
+                                                            TextButton(
+                                                              style: TextButton.styleFrom(
+                                                                foregroundColor:
+                                                                    Colors
+                                                                        .white,
+                                                                backgroundColor:
+                                                                    deleteButtonColor,
+                                                                padding:
+                                                                    const EdgeInsets.symmetric(
+                                                                      horizontal:
+                                                                          20,
+                                                                      vertical:
+                                                                          10,
+                                                                    ),
+                                                                shape: RoundedRectangleBorder(
+                                                                  borderRadius:
+                                                                      BorderRadius.circular(
+                                                                        8,
+                                                                      ),
                                                                 ),
-                                                            shape: RoundedRectangleBorder(
-                                                              borderRadius:
-                                                                  BorderRadius.circular(
-                                                                    8,
-                                                                  ),
+                                                              ),
+                                                              onPressed:
+                                                                  () =>
+                                                                      Navigator.pop(
+                                                                        context,
+                                                                        true,
+                                                                      ),
+                                                              child: const Text(
+                                                                'Xóa',
+                                                              ),
                                                             ),
-                                                          ),
-                                                          onPressed:
-                                                              () =>
-                                                                  Navigator.pop(
-                                                                    context,
-                                                                    true,
-                                                                  ),
-                                                          child: const Text(
-                                                            'Xóa',
-                                                          ),
+                                                          ],
                                                         ),
-                                                      ],
-                                                    ),
-                                              );
-                                              if (confirm == true) {
-                                                await deleteFile(path);
-                                              }
-                                            },
+                                                  );
+                                                  if (confirm == true) {
+                                                    await deleteFile(path);
+                                                  }
+                                                },
+                                              ),
+                                            ],
                                           ),
                                         ],
                                       ),
+                                      _buildAudioTimeline(path),
                                     ],
                                   ),
-                                  _buildAudioTimeline(path),
-                                ],
+                                ),
                               ),
-                            ),
+                            ],
                           );
                         },
                       ),

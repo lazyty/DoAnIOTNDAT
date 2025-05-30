@@ -346,17 +346,39 @@ class NhanDienTabState extends State<NhanDienTab>
 
   String _mapLanguage(String language) {
     const languageMap = {
-      'vi': '🇻🇳 Tiếng Việt',
-      'us': '🇺🇸 Tiếng Anh Mỹ',
-      'en': '🇺🇸 Tiếng Anh',
-      'gb': '🇬🇧 Tiếng Anh Anh',
-      'jp': '🇯🇵 Tiếng Nhật',
-      'kr': '🇰🇷 Tiếng Hàn',
-      'fr': '🇫🇷 Tiếng Pháp',
-      'de': '🇩🇪 Tiếng Đức',
-      'cn': '🇨🇳 Tiếng Trung',
-      'es': '🇪🇸 Tiếng Tây Ban Nha',
-      'th': '🇹🇭 Tiếng Thái',
+      "vi": "🇻🇳 Tiếng Việt",
+      "en": "🇬🇧 Tiếng Anh",
+      "en-US": "🇺🇸 Tiếng Anh Mỹ",
+      "en-GB": "🇬🇧 Tiếng Anh Anh",
+      "ja": "🇯🇵 Tiếng Nhật",
+      "ko": "🇰🇷 Tiếng Hàn",
+      "zh": "🇨🇳 Tiếng Trung",
+      "zh-TW": "🇹🇼 Tiếng Trung Phồn thể",
+      "fr": "🇫🇷 Tiếng Pháp",
+      "de": "🇩🇪 Tiếng Đức",
+      "es": "🇪🇸 Tiếng Tây Ban Nha",
+      "pt": "🇵🇹 Tiếng Bồ Đào Nha",
+      "pt-BR": "🇧🇷 Tiếng Bồ Đào Nha (Brazil)",
+      "it": "🇮🇹 Tiếng Ý",
+      "nl": "🇳🇱 Tiếng Hà Lan",
+      "ru": "🇷🇺 Tiếng Nga",
+      "pl": "🇵🇱 Tiếng Ba Lan",
+      "tr": "🇹🇷 Tiếng Thổ Nhĩ Kỳ",
+      "sv": "🇸🇪 Tiếng Thụy Điển",
+      "fi": "🇫🇮 Tiếng Phần Lan",
+      "no": "🇳🇴 Tiếng Na Uy",
+      "da": "🇩🇰 Tiếng Đan Mạch",
+      "cs": "🇨🇿 Tiếng Séc",
+      "hu": "🇭🇺 Tiếng Hungary",
+      "ro": "🇷🇴 Tiếng Romania",
+      "th": "🇹🇭 Tiếng Thái",
+      "id": "🇮🇩 Tiếng Indonesia",
+      "ms": "🇲🇾 Tiếng Malaysia",
+      "hi": "🇮🇳 Tiếng Hindi",
+      "bn": "🇧🇩 Tiếng Bengal",
+      "uk": "🇺🇦 Tiếng Ukraina",
+      "he": "🇮🇱 Tiếng Do Thái",
+      "ar": "🇸🇦 Tiếng Ả Rập"
     };
     return languageMap[language.toLowerCase().trim()] ?? '🌐 Không xác định';
   }
@@ -627,7 +649,6 @@ class NhanDienTabState extends State<NhanDienTab>
                           ],
                         ),
                   );
-
                   if (confirm == true) {
                     setState(() {
                       _noteEntries.clear();
