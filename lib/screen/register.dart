@@ -113,7 +113,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         .collection('Content_History')
         .add({
           'text': 'Tài khoản đã được tạo thành công.',
-          'language': '',
+          'language': 'vi',
           'source': 'System',
           'model':'',  
           'timestamp': Timestamp.now(),

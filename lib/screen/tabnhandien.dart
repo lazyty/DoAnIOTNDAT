@@ -154,16 +154,43 @@ class NhanDienTabState extends State<NhanDienTab>
   void _startListeningToRealtimeDatabase() {
     debugPrint('Bắt đầu lắng nghe Firebase Realtime Database...');
     _noteSub = _noteRef.onValue.listen((event) async {
-      final data = event.snapshot.value?.toString();
-      if (data?.isNotEmpty ?? false) {
+      try {
+        final data = event.snapshot.value?.toString();
+        if (data?.isEmpty ?? true) return;
+
+        // Get current user and username
+        final user = FirebaseAuth.instance.currentUser;
+        if (user == null) {
+          if (kDebugMode) debugPrint('Không có user đăng nhập');
+          return;
+        }
+
+        final snapshot = await FirebaseFirestore.instance
+            .collection('User_Information')
+            .doc(user.uid)
+            .get();
+        final username = snapshot.data()?['Username'] ?? 'unknown';
+
+        // Get other data
         final languageSnapshot = await _languageRef.get();
         final language = languageSnapshot.value?.toString() ?? 'unknown';
         final displayLanguage = _mapLanguage(language);
+        
         final deviceSnapshot = await _deviceRef.get();
         final source = deviceSnapshot.value?.toString() ?? 'unknown';
+        
         final modelSnapshot = await _modelRef.get();
         final modelname = modelSnapshot.value?.toString() ?? 'unknown';
-        // Cắt bớt nội dung nếu vượt quá _maxNoteLength
+
+        // Skip if this entry is from the current user
+        if (source == 'User: $username') {
+          if (kDebugMode) {
+            debugPrint('Bỏ qua entry từ current user: $source');
+          }
+          return;
+        }
+
+        // Trim data if too long
         String trimmedData = data!;
         if (trimmedData.length > _maxNoteLength) {
           trimmedData = '${trimmedData.substring(0, _maxNoteLength - 3)}...';
@@ -172,6 +199,19 @@ class NhanDienTabState extends State<NhanDienTab>
               'Ghi chú quá dài (${data.length} ký tự), đã cắt xuống còn $_maxNoteLength ký tự.',
             );
           }
+        }
+        // Kiểm tra trùng lặp
+        final isDuplicate = _noteEntries.isNotEmpty &&
+            _noteEntries.last.data == trimmedData &&
+            _noteEntries.last.source == source &&
+            _noteEntries.last.language == displayLanguage &&
+            _noteEntries.last.modelname == modelname;
+
+        if (isDuplicate) {
+          if (kDebugMode) {
+            debugPrint('Bỏ qua do trùng lặp nội dung với entry trước đó.');
+          }
+          return;
         }
 
         final noteEntry = NoteEntry(
@@ -182,6 +222,7 @@ class NhanDienTabState extends State<NhanDienTab>
           modelname: modelname,
         );
 
+        // Add to Firestore
         await _appendNoteToFirestore(
           trimmedData,
           source: source,
@@ -190,6 +231,7 @@ class NhanDienTabState extends State<NhanDienTab>
           modelname: modelname,
         );
 
+        // Update UI
         if (mounted) {
           setState(() {
             _noteEntries.add(noteEntry);
@@ -204,7 +246,10 @@ class NhanDienTabState extends State<NhanDienTab>
             }
           });
         }
-        await _noteRef.set('');
+      } catch (e) {
+        if (kDebugMode) {
+          debugPrint('Lỗi khi xử lý Realtime Database event: $e');
+        }
       }
     });
   }
@@ -212,7 +257,6 @@ class NhanDienTabState extends State<NhanDienTab>
   // Remove the redundant listener setup methods
   void startListeningFromUpload() {
     debugPrint("Nhận được thông báo từ upload - listener đã sẵn sàng");
-    // No need to add listener again, it's already added in initState
   }
 
   void _onLanguageOrContentChanged() async {
@@ -241,7 +285,7 @@ class NhanDienTabState extends State<NhanDienTab>
       }
 
       final noteEntry = NoteEntry(
-        source: 'User: $username',
+        source: 'User: $username (me)',
         language: displayLanguage,
         data: content,
         timestamp: DateTime.now(),
@@ -250,7 +294,7 @@ class NhanDienTabState extends State<NhanDienTab>
 
       await _appendNoteToFirestore(
         content,
-        source: 'User: $username',
+        source: 'User: $username (me)',
         language: displayLanguage,
         timestamp: noteEntry.timestamp,
         modelname: namemodel,

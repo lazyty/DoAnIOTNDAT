@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:record/record.dart';
@@ -347,8 +348,13 @@ class _GhiAmTabState extends State<GhiAmTab>
 
       if (response.statusCode == 200) {
         final jsonData = jsonDecode(responseBody);
+         await _sendToRealtimeDatabase({
+            'device': await _getDeviceString(),
+            'text': jsonData['text'] as String,
+            'language': jsonData['language'] as String,
+            'model': jsonData['model'] as String,
+          });
         if (kDebugMode) print('Server response JSON: $jsonData');
-
         if (jsonData['language'] != null && jsonData['text'] != null) {
           if (mounted) {
             widget.recognizedLanguage.value = jsonData['language'] as String;
@@ -391,6 +397,43 @@ class _GhiAmTabState extends State<GhiAmTab>
     }
   }
 
+  Future<void> _sendToRealtimeDatabase(Map<String, dynamic> data) async {
+    try {
+      DatabaseReference ref = FirebaseDatabase.instance.ref().child('Results');
+      await ref.set(data);
+      
+      if (kDebugMode) {
+        print('Dữ liệu đã được gửi tới Firebase Realtime Database thành công');
+        print('Dữ liệu gửi: $data');
+      }
+    } catch (e) {
+      if (kDebugMode) print('Lỗi khi gửi dữ liệu tới Firebase Realtime Database: $e');
+      // Optionally show error to user
+      rethrow; // Re-throw to handle in calling function if needed
+    }
+  }
+
+  Future<String> _getDeviceString() async {
+    try {
+      User? currentUser = FirebaseAuth.instance.currentUser;
+      if (currentUser != null) {
+        final user = FirebaseAuth.instance.currentUser;
+        final snapshot =
+            await FirebaseFirestore.instance
+                .collection('User_Information')
+                .doc(user?.uid)
+                .get();
+        final username = snapshot.data()?['Username'] ?? 'unknown';
+        return 'User: $username';
+      } else {
+        if (kDebugMode) print('Không có user đăng nhập');
+        return 'User: unknown';
+      }
+    } catch (e) {
+      if (kDebugMode) print('Lỗi khi lấy thông tin user: $e');
+      return 'User: unknown';
+    }
+  }
   // Pre-load audio duration to avoid flickering
   Future<void> _preloadAudioDuration(String path) async {
     if (_audioDurations.containsKey(path)) return;
