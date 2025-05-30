@@ -68,7 +68,7 @@ class _GhiAmTabState extends State<GhiAmTab>
   void initState() {
     super.initState();
     loadExistingFiles();
-    
+
     // Listen to player completion
     player.onPlayerComplete.listen((event) {
       if (mounted) {
@@ -85,7 +85,9 @@ class _GhiAmTabState extends State<GhiAmTab>
     Duration lastPosition = Duration.zero;
     player.onPositionChanged.listen((position) {
       // Only update if position changed significantly (reduce flickering)
-      if (mounted && isPlaying && !isPlaybackPaused && 
+      if (mounted &&
+          isPlaying &&
+          !isPlaybackPaused &&
           (position.inSeconds != lastPosition.inSeconds)) {
         lastPosition = position;
         setState(() {
@@ -190,11 +192,11 @@ class _GhiAmTabState extends State<GhiAmTab>
   Future stopRecord() async {
     if (_currentDuration.inSeconds < 5) {
       if (kDebugMode) {
-        print('⏱️ Ghi âm quá ngắn (< 5s), không dừng.');
+        print('Ghi âm quá ngắn (< 5s), không dừng.');
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Ghi âm phải dài ít nhất 5 giây')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Ghi âm phải dài ít nhất 5 giây')));
       return;
     }
 
@@ -208,7 +210,7 @@ class _GhiAmTabState extends State<GhiAmTab>
     if (path != null) {
       // Pre-load duration to avoid flickering later
       await _preloadAudioDuration(path);
-      
+
       if (mounted) {
         setState(() {
           _recordedFiles.insert(0, path);
@@ -231,7 +233,7 @@ class _GhiAmTabState extends State<GhiAmTab>
         }
       } else {
         if (kDebugMode) {
-          print('❌ Không tìm thấy file tại $path');
+          print('Không tìm thấy file tại $path');
         }
       }
     }
@@ -319,7 +321,7 @@ class _GhiAmTabState extends State<GhiAmTab>
   Future<void> uploadFile(String path) async {
     setState(() {
       uploadingFiles.add(path);
-      if (kDebugMode) print("⬆️ Bắt đầu upload: $uploadingFiles");
+      if (kDebugMode) print("Bắt đầu upload: $uploadingFiles");
     });
 
     try {
@@ -345,12 +347,13 @@ class _GhiAmTabState extends State<GhiAmTab>
 
       if (response.statusCode == 200) {
         final jsonData = jsonDecode(responseBody);
-        if (kDebugMode) print('✅ Server response JSON: $jsonData');
+        if (kDebugMode) print('Server response JSON: $jsonData');
 
         if (jsonData['language'] != null && jsonData['text'] != null) {
           if (mounted) {
             widget.recognizedLanguage.value = jsonData['language'] as String;
             widget.recognizedContent.value = jsonData['text'] as String;
+            widget.recognizedModel.value = jsonData['model'] as String;
             widget.onUploadSuccess?.call();
 
             ScaffoldMessenger.of(
@@ -359,7 +362,7 @@ class _GhiAmTabState extends State<GhiAmTab>
           }
         } else {
           if (kDebugMode) {
-            print("⚠️ Dữ liệu thiếu trường 'language' hoặc 'text': $jsonData");
+            print("Dữ liệu thiếu trường 'language' hoặc 'text': $jsonData");
           }
         }
       } else {
@@ -367,8 +370,8 @@ class _GhiAmTabState extends State<GhiAmTab>
       }
     } catch (e, stackTrace) {
       if (kDebugMode) {
-        print("❌ Exception khi upload: $e");
-        print("📌 Stacktrace: $stackTrace");
+        print("Exception khi upload: $e");
+        print("Stacktrace: $stackTrace");
       }
       if (mounted) {
         ScaffoldMessenger.of(
@@ -381,7 +384,7 @@ class _GhiAmTabState extends State<GhiAmTab>
         setState(() {
           uploadingFiles.remove(path);
           if (kDebugMode) {
-            print("✅ Kết thúc upload: $uploadingFiles");
+            print("Kết thúc upload: $uploadingFiles");
           }
         });
       }
@@ -391,7 +394,7 @@ class _GhiAmTabState extends State<GhiAmTab>
   // Pre-load audio duration to avoid flickering
   Future<void> _preloadAudioDuration(String path) async {
     if (_audioDurations.containsKey(path)) return;
-    
+
     try {
       final tempPlayer = AudioPlayer();
       try {
@@ -449,7 +452,7 @@ class _GhiAmTabState extends State<GhiAmTab>
     files.sort(
       (a, b) => b.statSync().modified.compareTo(a.statSync().modified),
     );
-    
+
     if (!mounted) return;
     setState(() {
       _recordedFiles.clear();
@@ -488,15 +491,18 @@ class _GhiAmTabState extends State<GhiAmTab>
   Widget _buildAudioTimeline(String path) {
     // Get cached duration immediately - no async here
     final duration = _audioDurations[path] ?? Duration.zero;
-    
+
     if (duration == Duration.zero || duration.inMilliseconds <= 0) {
       return const SizedBox(height: 10);
     }
 
     final isCurrentlyPlaying = isPlaying && currentlyPlayingPath == path;
-    final progress = isCurrentlyPlaying && duration.inMilliseconds > 0
-        ? (_currentPlaybackPosition.inMilliseconds / duration.inMilliseconds).clamp(0.0, 1.0)
-        : 0.0;
+    final progress =
+        isCurrentlyPlaying && duration.inMilliseconds > 0
+            ? (_currentPlaybackPosition.inMilliseconds /
+                    duration.inMilliseconds)
+                .clamp(0.0, 1.0)
+            : 0.0;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -525,17 +531,19 @@ class _GhiAmTabState extends State<GhiAmTab>
           ),
           child: Slider(
             value: progress,
-            onChanged: isCurrentlyPlaying
-                ? (value) {
-                    final newPosition = Duration(
-                      milliseconds: (value * duration.inMilliseconds).round(),
-                    );
-                    seekAudio(newPosition);
-                  }
-                : null,
-            activeColor: Theme.of(context).brightness == Brightness.dark 
-                ? Colors.white 
-                : Colors.black,
+            onChanged:
+                isCurrentlyPlaying
+                    ? (value) {
+                      final newPosition = Duration(
+                        milliseconds: (value * duration.inMilliseconds).round(),
+                      );
+                      seekAudio(newPosition);
+                    }
+                    : null,
+            activeColor:
+                Theme.of(context).brightness == Brightness.dark
+                    ? Colors.white
+                    : Colors.black,
             inactiveColor: Colors.grey[300],
           ),
         ),
@@ -565,9 +573,10 @@ class _GhiAmTabState extends State<GhiAmTab>
               children: [
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: isRecording
-                        ? (isPaused ? recordButtonColor : pauseButtonColor)
-                        : recordButtonColor,
+                    backgroundColor:
+                        isRecording
+                            ? (isPaused ? recordButtonColor : pauseButtonColor)
+                            : recordButtonColor,
                     foregroundColor: Colors.white,
                     minimumSize: const Size(60, 40),
                     padding: const EdgeInsets.all(8),
@@ -576,11 +585,12 @@ class _GhiAmTabState extends State<GhiAmTab>
                     ),
                     elevation: 3,
                   ),
-                  onPressed: (!isRecording && !isPlaying)
-                      ? startRecord
-                      : (isRecording
-                          ? (isPaused ? resumeRecord : pauseRecord)
-                          : null),
+                  onPressed:
+                      (!isRecording && !isPlaying)
+                          ? startRecord
+                          : (isRecording
+                              ? (isPaused ? resumeRecord : pauseRecord)
+                              : null),
                   child: Icon(
                     isRecording
                         ? (isPaused ? Icons.play_arrow : Icons.pause)
@@ -614,161 +624,230 @@ class _GhiAmTabState extends State<GhiAmTab>
             ),
             const SizedBox(height: 10),
             Expanded(
-              child: _recordedFiles.isEmpty
-                  ? const Center(
-                      child: Text(
-                        'Chưa có file ghi âm nào',
-                        style: TextStyle(color: Colors.grey),
-                      ),
-                    )
-                  : ListView.builder(
-                      // Add key to prevent unnecessary rebuilds
-                      key: const PageStorageKey('recordedList'),
-                      padding: EdgeInsets.zero,
-                      itemCount: _recordedFiles.length,
-                      itemBuilder: (context, index) {
-                        final path = _recordedFiles[index];
-                        final name = path.split('/').last;
-                        final isCurrentlyPlaying =
-                            isPlaying && currentlyPlayingPath == path;
+              child:
+                  _recordedFiles.isEmpty
+                      ? const Center(
+                        child: Text(
+                          'Chưa có file ghi âm nào',
+                          style: TextStyle(color: Colors.grey),
+                        ),
+                      )
+                      : ListView.builder(
+                        // Add key to prevent unnecessary rebuilds
+                        key: const PageStorageKey('recordedList'),
+                        padding: EdgeInsets.zero,
+                        itemCount: _recordedFiles.length,
+                        itemBuilder: (context, index) {
+                          final path = _recordedFiles[index];
+                          final name = path.split('/').last;
+                          final isCurrentlyPlaying =
+                              isPlaying && currentlyPlayingPath == path;
 
-                        return Card(
-                          margin: const EdgeInsets.symmetric(vertical: 4),
-                          child: Padding(
-                            padding: const EdgeInsets.all(10),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: Text(
-                                        name,
-                                        style: const TextStyle(
-                                          fontWeight: FontWeight.w500,
+                          return Card(
+                            margin: const EdgeInsets.symmetric(vertical: 4),
+                            child: Padding(
+                              padding: const EdgeInsets.all(10),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          name,
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.w500,
+                                          ),
                                         ),
                                       ),
-                                    ),
-                                    Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        IconButton(
-                                          style: IconButton.styleFrom(
-                                            backgroundColor: playButtonColor.withOpacity(0.1),
-                                            foregroundColor: playButtonColor,
+                                      Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          IconButton(
+                                            style: IconButton.styleFrom(
+                                              backgroundColor: playButtonColor
+                                                  .withOpacity(0.1),
+                                              foregroundColor: playButtonColor,
+                                            ),
+                                            icon: Icon(
+                                              isCurrentlyPlaying
+                                                  ? (isPlaybackPaused
+                                                      ? Icons.play_arrow
+                                                      : Icons.pause)
+                                                  : Icons.play_arrow,
+                                            ),
+                                            onPressed: () => playAudio(path),
                                           ),
-                                          icon: Icon(
-                                            isCurrentlyPlaying
-                                                ? (isPlaybackPaused
-                                                    ? Icons.play_arrow
-                                                    : Icons.pause)
-                                                : Icons.play_arrow,
-                                          ),
-                                          onPressed: () => playAudio(path),
-                                        ),
-                                        IconButton(
-                                          style: IconButton.styleFrom(
-                                            backgroundColor: uploadButtonColor.withOpacity(0.1),
-                                            foregroundColor: uploadButtonColor,
-                                          ),
-                                          icon: uploadingFiles.contains(path)
-                                              ? SizedBox(
-                                                  width: 24,
-                                                  height: 24,
-                                                  child: CircularProgressIndicator(
-                                                    strokeWidth: 2,
-                                                    valueColor: AlwaysStoppedAnimation<Color>(uploadButtonColor),
-                                                  ),
-                                                )
-                                              : const Icon(
-                                                  Icons.cloud_upload,
-                                                ),
-                                          onPressed: uploadingFiles.contains(path)
-                                              ? null
-                                              : () => uploadFile(path),
-                                        ),
-                                        IconButton(
-                                          style: IconButton.styleFrom(
-                                            backgroundColor: deleteButtonColor.withOpacity(0.1),
-                                            foregroundColor: deleteButtonColor,
-                                          ),
-                                          icon: const Icon(Icons.delete),
-                                          onPressed: () async {
-                                            // Nếu đang phát file, dừng phát âm thanh trước khi xóa
-                                            if (isPlaying && currentlyPlayingPath == path) {
-                                              await player.stop();
-                                              setState(() {
-                                                isPlaying = false;
-                                                isPlaybackPaused = false;
-                                                currentlyPlayingPath = null;
-                                                _currentPlaybackPosition = Duration.zero;
-                                              });
-                                            }
-                                            // Xác nhận và xóa file nếu người dùng đồng ý
-                                            final confirm = await showDialog<bool>(
-                                              context: context,
-                                              builder: (context) => AlertDialog(
-                                                backgroundColor: Theme.of(context).colorScheme.surface,
-                                                shape: RoundedRectangleBorder(
-                                                  borderRadius: BorderRadius.circular(10),
-                                                ),
-                                                title: Text(
-                                                  'Xóa file?',
-                                                  style: TextStyle(
-                                                    color: Theme.of(context).colorScheme.onSurface,
-                                                    fontWeight: FontWeight.bold,
-                                                  ),
-                                                ),
-                                                content: Text(
-                                                  'Bạn có chắc muốn xóa "$name"?',
-                                                  style: TextStyle(
-                                                    color: Theme.of(context).colorScheme.onSurface,
-                                                  ),
-                                                ),
-                                                actions: [
-                                                  TextButton(
-                                                    style: TextButton.styleFrom(
-                                                      foregroundColor: Colors.grey,
-                                                      backgroundColor: Colors.black.withOpacity(0.1),
-                                                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                                                      shape: RoundedRectangleBorder(
-                                                        borderRadius: BorderRadius.circular(8),
+                                          IconButton(
+                                            style: IconButton.styleFrom(
+                                              backgroundColor: uploadButtonColor
+                                                  .withOpacity(0.1),
+                                              foregroundColor:
+                                                  uploadButtonColor,
+                                            ),
+                                            icon:
+                                                uploadingFiles.contains(path)
+                                                    ? SizedBox(
+                                                      width: 24,
+                                                      height: 24,
+                                                      child: CircularProgressIndicator(
+                                                        strokeWidth: 2,
+                                                        valueColor:
+                                                            AlwaysStoppedAnimation<
+                                                              Color
+                                                            >(
+                                                              uploadButtonColor,
+                                                            ),
                                                       ),
+                                                    )
+                                                    : const Icon(
+                                                      Icons.cloud_upload,
                                                     ),
-                                                    onPressed: () => Navigator.pop(context, false),
-                                                    child: const Text('Không'),
-                                                  ),
-                                                  TextButton(
-                                                    style: TextButton.styleFrom(
-                                                      foregroundColor: Colors.white,
-                                                      backgroundColor: deleteButtonColor,
-                                                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                                            onPressed:
+                                                uploadingFiles.contains(path)
+                                                    ? null
+                                                    : () => uploadFile(path),
+                                          ),
+                                          IconButton(
+                                            style: IconButton.styleFrom(
+                                              backgroundColor: deleteButtonColor
+                                                  .withOpacity(0.1),
+                                              foregroundColor:
+                                                  deleteButtonColor,
+                                            ),
+                                            icon: const Icon(Icons.delete),
+                                            onPressed: () async {
+                                              // Nếu đang phát file, dừng phát âm thanh trước khi xóa
+                                              if (isPlaying &&
+                                                  currentlyPlayingPath ==
+                                                      path) {
+                                                await player.stop();
+                                                setState(() {
+                                                  isPlaying = false;
+                                                  isPlaybackPaused = false;
+                                                  currentlyPlayingPath = null;
+                                                  _currentPlaybackPosition =
+                                                      Duration.zero;
+                                                });
+                                              }
+                                              // Xác nhận và xóa file nếu người dùng đồng ý
+                                              final confirm = await showDialog<
+                                                bool
+                                              >(
+                                                context: context,
+                                                builder:
+                                                    (context) => AlertDialog(
+                                                      backgroundColor:
+                                                          Theme.of(
+                                                            context,
+                                                          ).colorScheme.surface,
                                                       shape: RoundedRectangleBorder(
-                                                        borderRadius: BorderRadius.circular(8),
+                                                        borderRadius:
+                                                            BorderRadius.circular(
+                                                              10,
+                                                            ),
                                                       ),
+                                                      title: Text(
+                                                        'Xóa file?',
+                                                        style: TextStyle(
+                                                          color:
+                                                              Theme.of(context)
+                                                                  .colorScheme
+                                                                  .onSurface,
+                                                          fontWeight:
+                                                              FontWeight.bold,
+                                                        ),
+                                                      ),
+                                                      content: Text(
+                                                        'Bạn có chắc muốn xóa "$name"?',
+                                                        style: TextStyle(
+                                                          color:
+                                                              Theme.of(context)
+                                                                  .colorScheme
+                                                                  .onSurface,
+                                                        ),
+                                                      ),
+                                                      actions: [
+                                                        TextButton(
+                                                          style: TextButton.styleFrom(
+                                                            foregroundColor:
+                                                                Colors.grey,
+                                                            backgroundColor:
+                                                                Colors.black
+                                                                    .withOpacity(
+                                                                      0.1,
+                                                                    ),
+                                                            padding:
+                                                                const EdgeInsets.symmetric(
+                                                                  horizontal:
+                                                                      20,
+                                                                  vertical: 10,
+                                                                ),
+                                                            shape: RoundedRectangleBorder(
+                                                              borderRadius:
+                                                                  BorderRadius.circular(
+                                                                    8,
+                                                                  ),
+                                                            ),
+                                                          ),
+                                                          onPressed:
+                                                              () =>
+                                                                  Navigator.pop(
+                                                                    context,
+                                                                    false,
+                                                                  ),
+                                                          child: const Text(
+                                                            'Không',
+                                                          ),
+                                                        ),
+                                                        TextButton(
+                                                          style: TextButton.styleFrom(
+                                                            foregroundColor:
+                                                                Colors.white,
+                                                            backgroundColor:
+                                                                deleteButtonColor,
+                                                            padding:
+                                                                const EdgeInsets.symmetric(
+                                                                  horizontal:
+                                                                      20,
+                                                                  vertical: 10,
+                                                                ),
+                                                            shape: RoundedRectangleBorder(
+                                                              borderRadius:
+                                                                  BorderRadius.circular(
+                                                                    8,
+                                                                  ),
+                                                            ),
+                                                          ),
+                                                          onPressed:
+                                                              () =>
+                                                                  Navigator.pop(
+                                                                    context,
+                                                                    true,
+                                                                  ),
+                                                          child: const Text(
+                                                            'Xóa',
+                                                          ),
+                                                        ),
+                                                      ],
                                                     ),
-                                                    onPressed: () => Navigator.pop(context, true),
-                                                    child: const Text('Xóa'),
-                                                  ),
-                                                ],
-                                              ),
-                                            );
-                                            if (confirm == true) {
-                                              await deleteFile(path);
-                                            }
-                                          },
-                                        ),
-                                      ],
-                                    ),
-                                  ],
-                                ),
-                                _buildAudioTimeline(path),
-                              ],
+                                              );
+                                              if (confirm == true) {
+                                                await deleteFile(path);
+                                              }
+                                            },
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                  _buildAudioTimeline(path),
+                                ],
+                              ),
                             ),
-                          ),
-                        );
-                      },
-                    ),
+                          );
+                        },
+                      ),
             ),
           ],
         ),

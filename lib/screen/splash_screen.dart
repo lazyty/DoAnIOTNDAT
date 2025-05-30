@@ -1,7 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'login.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -11,26 +11,38 @@ class SplashScreen extends StatefulWidget {
 }
 
 class _SplashScreenState extends State<SplashScreen> {
+  StreamSubscription<User?>? _authSubscription;
+
   @override
   void initState() {
     super.initState();
-    _checkLoginStatus();
+
+    // Delay để giữ splash 1 giây
+    Future.delayed(const Duration(seconds: 2), () {
+      // Đăng ký lắng nghe auth state
+      _authSubscription = FirebaseAuth.instance.authStateChanges().listen((user) {
+        if (!mounted) return;
+
+        if (user != null) {
+          Navigator.pushReplacementNamed(context, '/manhinhchinh');
+        } else {
+          Navigator.pushReplacementNamed(context, '/login');
+        }
+      });
+    });
   }
 
-  Future<void> _checkLoginStatus() async {
-    await Future.delayed(Duration(seconds: 1));
-
-    final user = FirebaseAuth.instance.currentUser;
-
-    if (user != null) {
-      Navigator.pushReplacementNamed(context, '/manhinhchinh');
-    } else {
-      Navigator.pushReplacementNamed(context, '/login');
-    }
+  @override
+  void dispose() {
+    _authSubscription?.cancel();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    return const Scaffold(
+      body: Center(child: CircularProgressIndicator()),
+    );
   }
 }
+

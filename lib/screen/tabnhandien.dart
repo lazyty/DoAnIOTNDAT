@@ -56,7 +56,6 @@ class NhanDienTabState extends State<NhanDienTab>
   late final DatabaseReference _modelRef;
   final ScrollController _scrollController = ScrollController();
   StreamSubscription? _noteSub;
-  bool _isListeningToApi = false;
 
   String? _lastSavedContent;
   DateTime? _lastSavedTime;
@@ -85,8 +84,8 @@ class NhanDienTabState extends State<NhanDienTab>
       _startListeningToRealtimeDatabase();
     });
 
+    // Add listener only once in initState
     widget.recognizedLanguage.addListener(_onLanguageOrContentChanged);
-    widget.recognizedContent.addListener(_onLanguageOrContentChanged);
   }
 
   @override
@@ -95,7 +94,6 @@ class NhanDienTabState extends State<NhanDienTab>
     _noteSub?.cancel();
     _scrollController.dispose();
     widget.recognizedLanguage.removeListener(_onLanguageOrContentChanged);
-    widget.recognizedContent.removeListener(_onLanguageOrContentChanged);
     super.dispose();
   }
 
@@ -143,20 +141,18 @@ class NhanDienTabState extends State<NhanDienTab>
             }
           });
         } else {
-          debugPrint(
-            "⚠️ Không tìm thấy tài liệu người dùng với uid: ${user.uid}",
-          );
+          debugPrint("Không tìm thấy tài liệu người dùng với uid: ${user.uid}");
         }
       } catch (e, stack) {
-        debugPrint("❌ Lỗi khi tải ghi chú từ Firestore: $e\n$stack");
+        debugPrint("Lỗi khi tải ghi chú từ Firestore: $e\n$stack");
       }
     } else {
-      debugPrint("⚠️ Không tìm thấy user hiện tại.");
+      debugPrint("Không tìm thấy user hiện tại.");
     }
   }
 
   void _startListeningToRealtimeDatabase() {
-    debugPrint('🟠 Bắt đầu lắng nghe Firebase Realtime Database...');
+    debugPrint('Bắt đầu lắng nghe Firebase Realtime Database...');
     _noteSub = _noteRef.onValue.listen((event) async {
       final data = event.snapshot.value?.toString();
       if (data?.isNotEmpty ?? false) {
@@ -173,7 +169,7 @@ class NhanDienTabState extends State<NhanDienTab>
           trimmedData = '${trimmedData.substring(0, _maxNoteLength - 3)}...';
           if (kDebugMode) {
             debugPrint(
-              '🔴 Ghi chú quá dài (${data.length} ký tự), đã cắt xuống còn $_maxNoteLength ký tự.',
+              'Ghi chú quá dài (${data.length} ký tự), đã cắt xuống còn $_maxNoteLength ký tự.',
             );
           }
         }
@@ -213,16 +209,10 @@ class NhanDienTabState extends State<NhanDienTab>
     });
   }
 
+  // Remove the redundant listener setup methods
   void startListeningFromUpload() {
-    debugPrint("Bắt đầu lắng nghe dữ liệu từ API sau khi upload");
-    _startListeningToApiResult();
-  }
-
-  void _startListeningToApiResult() {
-    if (!_isListeningToApi) {
-      widget.recognizedLanguage.addListener(_onLanguageOrContentChanged);
-      _isListeningToApi = true;
-    }
+    debugPrint("Nhận được thông báo từ upload - listener đã sẵn sàng");
+    // No need to add listener again, it's already added in initState
   }
 
   void _onLanguageOrContentChanged() async {
@@ -245,7 +235,7 @@ class NhanDienTabState extends State<NhanDienTab>
         content = '${content.substring(0, _maxNoteLength - 3)}...';
         if (kDebugMode) {
           debugPrint(
-            '🔴 Nội dung quá dài (${content.length} ký tự), đã rút gọn còn $_maxNoteLength ký tự.',
+            'Nội dung quá dài (${content.length} ký tự), đã rút gọn còn $_maxNoteLength ký tự.',
           );
         }
       }
@@ -493,8 +483,9 @@ class NhanDienTabState extends State<NhanDienTab>
 
     final metaRegex = RegExp(r'^\[(.*?)\] - \[(.*?)\]$');
     final timeRegex = RegExp(r'^\[(\d{2}:\d{2}:\d{2})\]:(.*)$');
-    final modelTimeRegex =
-        RegExp(r'^\[(\d{2}:\d{2}:\d{2})\]\s*\["?Model:\s*(.*?)"?\]\s*:(.*)$');
+    final modelTimeRegex = RegExp(
+      r'^\[(\d{2}:\d{2}:\d{2})\]\s*\["?Model:\s*(.*?)"?\]\s*:(.*)$',
+    );
 
     for (final line in lines) {
       if (metaRegex.hasMatch(line)) {
