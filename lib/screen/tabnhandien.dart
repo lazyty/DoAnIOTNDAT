@@ -1,4 +1,5 @@
 // ignore_for_file: avoid_types_as_parameter_names, duplicate_ignore
+import 'dart:math' as math show min;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
@@ -6,6 +7,7 @@ import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'dart:async';
 import 'package:flutter/services.dart';
+import 'dart:math';
 
 class NhanDienTab extends StatefulWidget {
   final ValueNotifier<String?> recognizedLanguage;
@@ -62,7 +64,14 @@ class NhanDienTabState extends State<NhanDienTab>
   bool _isSaving = false;
   List<NoteEntry> _noteEntries = [];
 
+  String? _recentlyDeletedContent;
+  String? _recentlyDeletedSource;
+  String? _recentlyDeletedLanguage;
+  String? _recentlyDeletedModel;
+  DateTime? _deletionTime;
+
   static const int _maxNoteLength = 30000;
+  static const int _deletionIgnoreDurationSeconds = 60; 
 
   @override
   bool get wantKeepAlive => true;
@@ -200,6 +209,13 @@ class NhanDienTabState extends State<NhanDienTab>
             );
           }
         }
+        if (_isRecentlyDeletedContent(trimmedData, source, displayLanguage, modelname)) {
+          if (kDebugMode) {
+            debugPrint('Bỏ qua do trùng với nội dung vừa bị xóa.');
+          }
+          return;
+        }
+        
         // Kiểm tra trùng lặp
         final isDuplicate = _noteEntries.isNotEmpty &&
             _noteEntries.last.data == trimmedData &&
@@ -254,7 +270,7 @@ class NhanDienTabState extends State<NhanDienTab>
     });
   }
 
-  // Remove the redundant listener setup methods
+
   void startListeningFromUpload() {
     debugPrint("Nhận được thông báo từ upload - listener đã sẵn sàng");
   }
@@ -427,6 +443,49 @@ class NhanDienTabState extends State<NhanDienTab>
     return languageMap[language.toLowerCase().trim()] ?? '🌐 Không xác định';
   }
 
+   bool _isRecentlyDeletedContent(String content, String source, String language, String model) {
+    if (_recentlyDeletedContent == null || _deletionTime == null) {
+      return false;
+    }
+
+    final now = DateTime.now();
+    final timeSinceDeletion = now.difference(_deletionTime!);
+    
+    if (timeSinceDeletion.inSeconds > _deletionIgnoreDurationSeconds) {
+      _clearRecentlyDeletedData();
+      return false;
+    }
+
+    return _recentlyDeletedContent == content &&
+           _recentlyDeletedSource == source &&
+           _recentlyDeletedLanguage == language &&
+           _recentlyDeletedModel == model;
+  }
+
+  void _storeRecentlyDeletedContent(NoteEntry deletedNote) {
+    _recentlyDeletedContent = deletedNote.data;
+    _recentlyDeletedSource = deletedNote.source;
+    _recentlyDeletedLanguage = deletedNote.language;
+    _recentlyDeletedModel = deletedNote.modelname;
+    _deletionTime = DateTime.now();
+    
+    if (kDebugMode) {
+      debugPrint('Stored recently deleted content: ${deletedNote.data.substring(0, math.min(50, deletedNote.data.length))}...');
+    }
+  }
+
+  void _clearRecentlyDeletedData() {
+    _recentlyDeletedContent = null;
+    _recentlyDeletedSource = null;
+    _recentlyDeletedLanguage = null;
+    _recentlyDeletedModel = null;
+    _deletionTime = null;
+    
+    if (kDebugMode) {
+      debugPrint('Cleared recently deleted content data');
+    }
+  }
+
   Future<void> _clearContentHistoryForCurrentUser() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
@@ -441,6 +500,8 @@ class NhanDienTabState extends State<NhanDienTab>
     for (final doc in snapshot.docs) {
       await doc.reference.delete();
     }
+
+    _clearRecentlyDeletedData();
   }
 
   void _showChatOptionsDialog(BuildContext context, String fullText) {
@@ -487,46 +548,73 @@ class NhanDienTabState extends State<NhanDienTab>
     );
   }
 
-  void _handleDelete(BuildContext context, String fullText) async {
-    final deleted = await _deleteNoteEntryByText(fullText);
-    if (deleted) {
-      setState(() {
-        _noteEntries.removeWhere(
-          (note) => note.toString().trim() == fullText.trim(),
-        );
-      });
-
-      Navigator.pop(context);
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text("Xóa thành công")));
-    } else {
-      Navigator.pop(context);
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text("Không thể xóa")));
-    }
-  }
-
   Future<bool> _deleteNoteEntryByText(String fullText) async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return false;
-    // Regex để tách [source] - [language]\n[00:00:00]: nội dung
-    final regex = RegExp(
-      r'^\[(.*?)\] - \[(.*?)\]\n\[\d{2}:\d{2}:\d{2}\]: (.*)$',
-      dotAll: true,
-    );
-    final match = regex.firstMatch(fullText.trim());
-    if (match == null) return false;
+    
+    try {
+      // Updated regex to handle both formats: with and without [Model: xxx]
+      final regex = RegExp(
+        r'^\[(.*?)\] - \[(.*?)\]\n\[(\d{2}:\d{2}:\d{2})\](?:\[Model:\s*(.*?)\])?\s*:\s*(.*)$',
+        dotAll: true,
+      );
+      final match = regex.firstMatch(fullText.trim());
+      
+      if (match == null) {
+        if (kDebugMode) {
+          print('Regex không khớp với text: $fullText');
+        }
+        return false;
+      }
 
-    final source = match.group(1);
-    final language = match.group(2);
-    final data = match.group(3)?.trim();
+      final source = match.group(1)?.trim();
+      final language = match.group(2)?.trim();
+      final time = match.group(3)?.trim();
+      final model = match.group(4)?.trim(); // Có thể null
+      final data = match.group(5)?.trim();
 
-    if (data == null) return false;
+      if (data == null || data.isEmpty) {
+        if (kDebugMode) {
+          print('Không tìm thấy data để xóa');
+        }
+        return false;
+      }
 
-    final snapshot =
-        await FirebaseFirestore.instance
+      if (kDebugMode) {
+        print('Attempting to delete: source=$source, language=$language, data=$data, model=$model');
+      }
+
+      // Try multiple queries to find the document
+      QuerySnapshot snapshot;
+      
+      // First try: exact match with all fields
+      if (model != null && model.isNotEmpty) {
+        snapshot = await FirebaseFirestore.instance
+            .collection("User_Information")
+            .doc(uid)
+            .collection("Content_History")
+            .where("text", isEqualTo: data)
+            .where("language", isEqualTo: language)
+            .where("source", isEqualTo: source)
+            .where("model", isEqualTo: model)
+            .limit(1)
+            .get();
+      } else {
+        // Try without model field
+        snapshot = await FirebaseFirestore.instance
+            .collection("User_Information")
+            .doc(uid)
+            .collection("Content_History")
+            .where("text", isEqualTo: data)
+            .where("language", isEqualTo: language)
+            .where("source", isEqualTo: source)
+            .limit(1)
+            .get();
+      }
+
+      if (snapshot.docs.isEmpty) {
+        // Fallback: try with just text and language
+        snapshot = await FirebaseFirestore.instance
             .collection("User_Information")
             .doc(uid)
             .collection("Content_History")
@@ -534,13 +622,69 @@ class NhanDienTabState extends State<NhanDienTab>
             .where("language", isEqualTo: language)
             .limit(1)
             .get();
+      }
 
-    if (snapshot.docs.isNotEmpty) {
-      await snapshot.docs.first.reference.delete();
-      return true;
+      if (snapshot.docs.isEmpty) {
+        // Last resort: try with just text
+        snapshot = await FirebaseFirestore.instance
+            .collection("User_Information")
+            .doc(uid)
+            .collection("Content_History")
+            .where("text", isEqualTo: data)
+            .limit(1)
+            .get();
+      }
+
+      if (snapshot.docs.isNotEmpty) {
+        await snapshot.docs.first.reference.delete();
+        if (kDebugMode) {
+          print('Successfully deleted document');
+        }
+        return true;
+      } else {
+        if (kDebugMode) {
+          print('No matching document found in Firestore');
+        }
+        return false;
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('Error deleting note: $e');
+      }
+      return false;
     }
+  }
 
-    return false;
+  void _handleDelete(BuildContext context, String fullText) async {
+    final noteToDelete = _noteEntries.firstWhere(
+      (note) => note.toString().trim() == fullText.trim(),
+      orElse: () => throw StateError('Note not found'),
+    );
+
+    final deleted = await _deleteNoteEntryByText(fullText);
+    
+    if (deleted) {
+      _storeRecentlyDeletedContent(noteToDelete);
+
+      setState(() {
+        _noteEntries.removeWhere(
+          (note) => note.toString().trim() == fullText.trim(),
+        );
+      });
+
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Xóa thành công"))
+      );
+    } else {
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Không thể xóa"),
+          backgroundColor: Colors.red,
+        )
+      );
+    }
   }
 
   List<TextSpan> _buildStyledNoteTextSpans(String text) {
