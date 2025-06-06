@@ -116,6 +116,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
           'language': 'vi',
           'source': 'System',
           'model':'',  
+          'translate':'',
           'timestamp': Timestamp.now(),
           'isUser': false,
         });

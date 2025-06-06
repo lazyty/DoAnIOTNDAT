@@ -8,6 +8,11 @@ import 'package:flutter/material.dart';
 import 'dart:async';
 import 'package:flutter/services.dart';
 import 'dart:math';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+import 'dart:io';
+import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class NhanDienTab extends StatefulWidget {
   final ValueNotifier<String?> recognizedLanguage;
@@ -30,6 +35,8 @@ class NoteEntry {
   final String language;
   final DateTime timestamp;
   final String modelname;
+  final String? translatedText;
+  final String? flagAndLang;
 
   NoteEntry({
     required this.source,
@@ -37,7 +44,29 @@ class NoteEntry {
     required this.data,
     required this.timestamp,
     required this.modelname,
+    this.translatedText,
+    this.flagAndLang,
   });
+
+  NoteEntry copyWith({
+    String? source,
+    String? data,
+    String? language,
+    DateTime? timestamp,
+    String? modelname,
+    String? translatedText,
+    String? flagAndLang,
+  }) {
+    return NoteEntry(
+      source: source ?? this.source,
+      data: data ?? this.data,
+      language: language ?? this.language,
+      timestamp: timestamp ?? this.timestamp,
+      modelname: modelname ?? this.modelname,
+      translatedText: translatedText ?? this.translatedText,
+      flagAndLang: flagAndLang ?? this.flagAndLang,
+    );
+  }
 
   @override
   String toString() {
@@ -45,7 +74,14 @@ class NoteEntry {
         '${timestamp.hour.toString().padLeft(2, '0')}:'
         '${timestamp.minute.toString().padLeft(2, '0')}:'
         '${timestamp.second.toString().padLeft(2, '0')}';
-    return '[$source] - [$language]\n[$formattedTime][Model: $modelname]: $data';
+
+    String result =
+        '[$source] - [$language]\n[$formattedTime][Model: $modelname]: $data';
+
+    if (translatedText != null && translatedText!.isNotEmpty && flagAndLang != null) {
+      result += '\n🌐 Dịch sang $flagAndLang: $translatedText';
+    }
+    return result;
   }
 }
 
@@ -70,8 +106,30 @@ class NhanDienTabState extends State<NhanDienTab>
   String? _recentlyDeletedModel;
   DateTime? _deletionTime;
 
+  // Translation settings
+  static const String _geminiApiKey = '';
+  String _selectedTargetLanguage = 'vi';
+  final Map<String, String> _translationCache = {};
+
+  // Available target languages for translation
+  final Map<String, String> _availableLanguages = {
+    'vi': '🇻🇳 Tiếng Việt',
+    'en': '🇬🇧 English',
+    'ja': '🇯🇵 日本語',
+    'ko': '🇰🇷 한국어',
+    'zh': '🇨🇳 中文',
+    'fr': '🇫🇷 Français',
+    'de': '🇩🇪 Deutsch',
+    'es': '🇪🇸 Español',
+    'pt': '🇵🇹 Português',
+    'it': '🇮🇹 Italiano',
+    'ru': '🇷🇺 Русский',
+    'th': '🇹🇭 ไทย',
+    'ar': '🇸🇦 العربية',
+  };
+
   static const int _maxNoteLength = 30000;
-  static const int _deletionIgnoreDurationSeconds = 60; 
+  static const int _deletionIgnoreDurationSeconds = 300;
 
   @override
   bool get wantKeepAlive => true;
@@ -92,8 +150,7 @@ class NhanDienTabState extends State<NhanDienTab>
     _loadNotesFromFirestore().then((_) {
       _startListeningToRealtimeDatabase();
     });
-
-    // Add listener only once in initState
+    _loadSelectedLanguage();
     widget.recognizedLanguage.addListener(_onLanguageOrContentChanged);
   }
 
@@ -104,6 +161,148 @@ class NhanDienTabState extends State<NhanDienTab>
     _scrollController.dispose();
     widget.recognizedLanguage.removeListener(_onLanguageOrContentChanged);
     super.dispose();
+  }
+
+  Future<String?> _translateText(String text, String sourceLanguage) async {
+    try {
+      final cacheKey = '${text}_${sourceLanguage}_$_selectedTargetLanguage';
+      if (_translationCache.containsKey(cacheKey)) {
+        return _translationCache[cacheKey];
+      }
+
+      if (_getLanguageCode(sourceLanguage) == _selectedTargetLanguage) {
+        return null;
+      }
+
+      const url =
+          'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
+
+      final prompt =
+          'Translate the following ${_getLanguageName(_getLanguageCode(sourceLanguage))} sentence into ${_getLanguageName(_selectedTargetLanguage)} in one sentence only. '
+          'Return only the translated text, no explanations or additional text: "$text"';
+
+      final response = await http.post(
+        Uri.parse('$url?key=$_geminiApiKey'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'contents': [
+            {
+              'parts': [
+                {'text': prompt},
+              ],
+            },
+          ],
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final translatedText =
+            data['candidates']?[0]?['content']?['parts']?[0]?['text']
+                ?.toString()
+                .trim();
+
+        if (translatedText != null && translatedText.isNotEmpty) {
+          _translationCache[cacheKey] = translatedText;
+          return translatedText;
+        }
+      } else {
+        if (kDebugMode) {
+          debugPrint(
+            'Translation API error: ${response.statusCode} - ${response.body}',
+          );
+        }
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('Translation error: $e');
+      }
+    }
+    return null;
+  }
+
+  String _getLanguageCode(String displayLanguage) {
+    const languageCodeMap = {
+      "🇻🇳 Tiếng Việt": "vi",
+      "🇬🇧 Tiếng Anh": "en",
+      "🇺🇸 Tiếng Anh Mỹ": "en",
+      "🇬🇧 Tiếng Anh Anh": "en",
+      "🇯🇵 Tiếng Nhật": "ja",
+      "🇰🇷 Tiếng Hàn": "ko",
+      "🇨🇳 Tiếng Trung": "zh",
+      "🇹🇼 Tiếng Trung Phồn thể": "zh",
+      "🇫🇷 Tiếng Pháp": "fr",
+      "🇩🇪 Tiếng Đức": "de",
+      "🇪🇸 Tiếng Tây Ban Nha": "es",
+      "🇵🇹 Tiếng Bồ Đào Nha": "pt",
+      "🇧🇷 Tiếng Bồ Đào Nha (Brazil)": "pt",
+      "🇮🇹 Tiếng Ý": "it",
+      "🇳🇱 Tiếng Hà Lan": "nl",
+      "🇷🇺 Tiếng Nga": "ru",
+      "🇵🇱 Tiếng Ba Lan": "pl",
+      "🇹🇷 Tiếng Thổ Nhĩ Kỳ": "tr",
+      "🇸🇪 Tiếng Thụy Điển": "sv",
+      "🇫🇮 Tiếng Phần Lan": "fi",
+      "🇳🇴 Tiếng Na Uy": "no",
+      "🇩🇰 Tiếng Đan Mạch": "da",
+      "🇨🇿 Tiếng Séc": "cs",
+      "🇭🇺 Tiếng Hungary": "hu",
+      "🇷🇴 Tiếng Romania": "ro",
+      "🇹🇭 Tiếng Thái": "th",
+      "🇮🇩 Tiếng Indonesia": "id",
+      "🇲🇾 Tiếng Malaysia": "ms",
+      "🇮🇳 Tiếng Hindi": "hi",
+      "🇧🇩 Tiếng Bengal": "bn",
+      "🇺🇦 Tiếng Ukraina": "uk",
+      "🇮🇱 Tiếng Do Thái": "he",
+      "🇸🇦 Tiếng Ả Rập": "ar",
+    };
+    return languageCodeMap[displayLanguage] ?? 'unknown';
+  }
+
+  String _getLanguageName(String languageCode) {
+    const languageNameMap = {
+      'vi': 'Vietnamese',
+      'en': 'English',
+      'ja': 'Japanese',
+      'ko': 'Korean',
+      'zh': 'Chinese',
+      'fr': 'French',
+      'de': 'German',
+      'es': 'Spanish',
+      'pt': 'Portuguese',
+      'it': 'Italian',
+      'nl': 'Dutch',
+      'ru': 'Russian',
+      'pl': 'Polish',
+      'tr': 'Turkish',
+      'sv': 'Swedish',
+      'fi': 'Finnish',
+      'no': 'Norwegian',
+      'da': 'Danish',
+      'cs': 'Czech',
+      'hu': 'Hungarian',
+      'ro': 'Romanian',
+      'th': 'Thai',
+      'id': 'Indonesian',
+      'ms': 'Malay',
+      'hi': 'Hindi',
+      'bn': 'Bengali',
+      'uk': 'Ukrainian',
+      'he': 'Hebrew',
+      'ar': 'Arabic',
+    };
+    return languageNameMap[languageCode] ?? 'Unknown';
+  }
+
+  Future<void> _loadSelectedLanguage() async {
+    final prefs = await SharedPreferences.getInstance();
+    final savedLang = prefs.getString('selectedLanguage');
+    if (savedLang != null && _availableLanguages.containsKey(savedLang)) {
+      setState(() {
+        _selectedTargetLanguage = savedLang;
+      });
+    }
   }
 
   Future<void> _loadNotesFromFirestore() async {
@@ -130,6 +329,7 @@ class NhanDienTabState extends State<NhanDienTab>
                   language: data['language'] ?? '',
                   data: data['text'] ?? '',
                   modelname: data['model'] ?? '',
+                  translatedText: data['translatedText'],
                   timestamp:
                       (data['timestamp'] as Timestamp?)?.toDate() ??
                       DateTime.now(),
@@ -139,6 +339,8 @@ class NhanDienTabState extends State<NhanDienTab>
           setState(() {
             _noteEntries = entries;
           });
+
+          _translateMissingEntries();
 
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (_scrollController.hasClients) {
@@ -160,6 +362,75 @@ class NhanDienTabState extends State<NhanDienTab>
     }
   }
 
+  Future<void> _translateMissingEntries() async {
+    for (int i = 0; i < _noteEntries.length; i++) {
+      final entry = _noteEntries[i];
+      final selectedLangName = _availableLanguages[_selectedTargetLanguage];
+      final sourceCode = _getLanguageCode(entry.language);
+      if (sourceCode == _selectedTargetLanguage) {
+        if (entry.translatedText != null || entry.flagAndLang != null) {
+          _noteEntries[i] = entry.copyWith(
+            translatedText: null,
+            flagAndLang: null,
+          );
+          if (mounted) setState(() {});
+        }
+        continue;
+      }
+
+      if (entry.translatedText == null ||
+          entry.translatedText!.isEmpty ||
+          entry.flagAndLang != selectedLangName) {
+
+        final translatedText = await _translateText(entry.data, entry.language);
+
+        if (translatedText != null) {
+          _noteEntries[i] = entry.copyWith(
+            translatedText: translatedText,
+            flagAndLang: selectedLangName,
+          );
+
+          await _updateTranslationInFirestore(entry, translatedText);
+          if (mounted) setState(() {});
+        }
+      }
+    }
+  }
+
+  Future<void> _updateTranslationInFirestore(
+    NoteEntry entry,
+    String translatedText,
+  ) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    try {
+      final firestore = FirebaseFirestore.instance;
+      final historyCollection = firestore
+          .collection('User_Information')
+          .doc(user.uid)
+          .collection('Content_History');
+
+      final querySnapshot = await historyCollection
+          .where('text', isEqualTo: entry.data)
+          .where('language', isEqualTo: entry.language)
+          .where('source', isEqualTo: entry.source)
+          .limit(1)
+          .get();
+
+      if (querySnapshot.docs.isNotEmpty) {
+        await querySnapshot.docs.first.reference.update({
+          'translatedText': translatedText,
+          'translatedLanguage': _availableLanguages[_selectedTargetLanguage] ?? _selectedTargetLanguage,
+        });
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('Error updating translation in Firestore: $e');
+      }
+    }
+  }
+
   void _startListeningToRealtimeDatabase() {
     debugPrint('Bắt đầu lắng nghe Firebase Realtime Database...');
     _noteSub = _noteRef.onValue.listen((event) async {
@@ -174,24 +445,24 @@ class NhanDienTabState extends State<NhanDienTab>
           return;
         }
 
-        final snapshot = await FirebaseFirestore.instance
-            .collection('User_Information')
-            .doc(user.uid)
-            .get();
+        final snapshot =
+            await FirebaseFirestore.instance
+                .collection('User_Information')
+                .doc(user.uid)
+                .get();
         final username = snapshot.data()?['Username'] ?? 'unknown';
 
         // Get other data
         final languageSnapshot = await _languageRef.get();
         final language = languageSnapshot.value?.toString() ?? 'unknown';
         final displayLanguage = _mapLanguage(language);
-        
+
         final deviceSnapshot = await _deviceRef.get();
         final source = deviceSnapshot.value?.toString() ?? 'unknown';
-        
+
         final modelSnapshot = await _modelRef.get();
         final modelname = modelSnapshot.value?.toString() ?? 'unknown';
 
-        // Skip if this entry is from the current user
         if (source == 'User: $username') {
           if (kDebugMode) {
             debugPrint('Bỏ qua entry từ current user: $source');
@@ -199,7 +470,6 @@ class NhanDienTabState extends State<NhanDienTab>
           return;
         }
 
-        // Trim data if too long
         String trimmedData = data!;
         if (trimmedData.length > _maxNoteLength) {
           trimmedData = '${trimmedData.substring(0, _maxNoteLength - 3)}...';
@@ -209,15 +479,20 @@ class NhanDienTabState extends State<NhanDienTab>
             );
           }
         }
-        if (_isRecentlyDeletedContent(trimmedData, source, displayLanguage, modelname)) {
+        if (_isRecentlyDeletedContent(
+          trimmedData,
+          source,
+          displayLanguage,
+          modelname,
+        )) {
           if (kDebugMode) {
             debugPrint('Bỏ qua do trùng với nội dung vừa bị xóa.');
           }
           return;
         }
-        
-        // Kiểm tra trùng lặp
-        final isDuplicate = _noteEntries.isNotEmpty &&
+
+        final isDuplicate =
+            _noteEntries.isNotEmpty &&
             _noteEntries.last.data == trimmedData &&
             _noteEntries.last.source == source &&
             _noteEntries.last.language == displayLanguage &&
@@ -230,12 +505,22 @@ class NhanDienTabState extends State<NhanDienTab>
           return;
         }
 
+        final translatedText = await _translateText(
+          trimmedData,
+          displayLanguage,
+        );
+
+        final langCode = _selectedTargetLanguage;
+        final flagAndLang = _availableLanguages[langCode] ?? langCode;
+
         final noteEntry = NoteEntry(
           source: source,
           language: displayLanguage,
           data: trimmedData,
           timestamp: DateTime.now(),
           modelname: modelname,
+          flagAndLang: flagAndLang,
+          translatedText: translatedText,
         );
 
         // Add to Firestore
@@ -245,6 +530,8 @@ class NhanDienTabState extends State<NhanDienTab>
           language: displayLanguage,
           timestamp: noteEntry.timestamp,
           modelname: modelname,
+          translatedText: translatedText,
+          translatedLanguage: flagAndLang,
         );
 
         // Update UI
@@ -269,7 +556,6 @@ class NhanDienTabState extends State<NhanDienTab>
       }
     });
   }
-
 
   void startListeningFromUpload() {
     debugPrint("Nhận được thông báo từ upload - listener đã sẵn sàng");
@@ -300,12 +586,20 @@ class NhanDienTabState extends State<NhanDienTab>
         }
       }
 
+      // Translate the content
+      final translatedText = await _translateText(content, displayLanguage);
+
+      final langCode = _selectedTargetLanguage;
+      final flagAndLang = _availableLanguages[langCode] ?? langCode;
+
       final noteEntry = NoteEntry(
         source: 'User: $username (me)',
         language: displayLanguage,
         data: content,
         timestamp: DateTime.now(),
         modelname: namemodel!,
+        translatedText: translatedText,
+        flagAndLang: flagAndLang,
       );
 
       await _appendNoteToFirestore(
@@ -314,6 +608,8 @@ class NhanDienTabState extends State<NhanDienTab>
         language: displayLanguage,
         timestamp: noteEntry.timestamp,
         modelname: namemodel,
+        translatedText: translatedText,
+        translatedLanguage: flagAndLang,
       );
 
       if (mounted) {
@@ -343,6 +639,8 @@ class NhanDienTabState extends State<NhanDienTab>
     String? language,
     required DateTime timestamp,
     required String modelname,
+    String? translatedText,
+    String? translatedLanguage,
   }) async {
     final trimmedEntry = newEntry.trim();
     final now = DateTime.now();
@@ -368,14 +666,20 @@ class NhanDienTabState extends State<NhanDienTab>
             .doc(uid)
             .collection('Content_History');
 
-        await docRef.add({
+        final documentData = {
           'text': trimmedEntry,
           'language': language ?? '',
           'source': source,
           'isUser': source.contains('User'),
           'timestamp': Timestamp.fromDate(timestamp),
           'model': modelname,
-        });
+        };
+
+        if (translatedText != null && translatedText.isNotEmpty) {
+          documentData['translatedText'] = translatedText;
+        }
+
+        await docRef.add(documentData);
 
         _lastSavedContent = trimmedEntry;
         _lastSavedTime = now;
@@ -438,28 +742,33 @@ class NhanDienTabState extends State<NhanDienTab>
       "bn": "🇧🇩 Tiếng Bengal",
       "uk": "🇺🇦 Tiếng Ukraina",
       "he": "🇮🇱 Tiếng Do Thái",
-      "ar": "🇸🇦 Tiếng Ả Rập"
+      "ar": "🇸🇦 Tiếng Ả Rập",
     };
     return languageMap[language.toLowerCase().trim()] ?? '🌐 Không xác định';
   }
 
-   bool _isRecentlyDeletedContent(String content, String source, String language, String model) {
+  bool _isRecentlyDeletedContent(
+    String content,
+    String source,
+    String language,
+    String model,
+  ) {
     if (_recentlyDeletedContent == null || _deletionTime == null) {
       return false;
     }
 
     final now = DateTime.now();
     final timeSinceDeletion = now.difference(_deletionTime!);
-    
+
     if (timeSinceDeletion.inSeconds > _deletionIgnoreDurationSeconds) {
       _clearRecentlyDeletedData();
       return false;
     }
 
     return _recentlyDeletedContent == content &&
-           _recentlyDeletedSource == source &&
-           _recentlyDeletedLanguage == language &&
-           _recentlyDeletedModel == model;
+        _recentlyDeletedSource == source &&
+        _recentlyDeletedLanguage == language &&
+        _recentlyDeletedModel == model;
   }
 
   void _storeRecentlyDeletedContent(NoteEntry deletedNote) {
@@ -468,9 +777,11 @@ class NhanDienTabState extends State<NhanDienTab>
     _recentlyDeletedLanguage = deletedNote.language;
     _recentlyDeletedModel = deletedNote.modelname;
     _deletionTime = DateTime.now();
-    
+
     if (kDebugMode) {
-      debugPrint('Stored recently deleted content: ${deletedNote.data.substring(0, math.min(50, deletedNote.data.length))}...');
+      debugPrint(
+        'Stored recently deleted content: ${deletedNote.data.substring(0, math.min(50, deletedNote.data.length))}...',
+      );
     }
   }
 
@@ -480,7 +791,7 @@ class NhanDienTabState extends State<NhanDienTab>
     _recentlyDeletedLanguage = null;
     _recentlyDeletedModel = null;
     _deletionTime = null;
-    
+
     if (kDebugMode) {
       debugPrint('Cleared recently deleted content data');
     }
@@ -500,190 +811,169 @@ class NhanDienTabState extends State<NhanDienTab>
     for (final doc in snapshot.docs) {
       await doc.reference.delete();
     }
-
     _clearRecentlyDeletedData();
-  }
-
-  void _showChatOptionsDialog(BuildContext context, String fullText) {
-    showDialog(
-      context: context,
-      builder:
-          (context) => AlertDialog(
-            title: const Text("Tùy chọn"),
-            content: SizedBox(
-              width: double.maxFinite,
-              child: SingleChildScrollView(
-                child: SelectableText.rich(
-                  TextSpan(
-                    style: const TextStyle(fontSize: 16, color: Colors.black),
-                    children: _buildStyledNoteTextSpans(fullText),
-                  ),
-                ),
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text("Cancel"),
-              ),
-              TextButton(
-                onPressed: () {
-                  Clipboard.setData(ClipboardData(text: fullText));
-                  Navigator.pop(context);
-                  ScaffoldMessenger.of(
-                    context,
-                  ).showSnackBar(const SnackBar(content: Text("Đã sao chép")));
-                },
-                child: const Text("Copy"),
-              ),
-              TextButton(
-                onPressed: () => _handleDelete(context, fullText),
-                child: const Text(
-                  "Delete",
-                  style: TextStyle(color: Colors.red),
-                ),
-              ),
-            ],
-          ),
-    );
   }
 
   Future<bool> _deleteNoteEntryByText(String fullText) async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return false;
-    
+
     try {
-      // Updated regex to handle both formats: with and without [Model: xxx]
-      final regex = RegExp(
-        r'^\[(.*?)\] - \[(.*?)\]\n\[(\d{2}:\d{2}:\d{2})\](?:\[Model:\s*(.*?)\])?\s*:\s*(.*)$',
-        dotAll: true,
-      );
-      final match = regex.firstMatch(fullText.trim());
-      
-      if (match == null) {
-        if (kDebugMode) {
-          print('Regex không khớp với text: $fullText');
+      // Parse the fullText to extract the actual data content
+      final lines = fullText.trim().split('\n');
+      if (lines.length < 2) return false;
+
+      // Extract source and language from first line: [source] - [language]
+      final firstLineRegex = RegExp(r'^\[(.*?)\] - \[(.*?)\]$');
+      final firstLineMatch = firstLineRegex.firstMatch(lines[0].trim());
+      if (firstLineMatch == null) return false;
+
+      final source = firstLineMatch.group(1)?.trim();
+      final language = firstLineMatch.group(2)?.trim();
+
+      // Extract actual content from the remaining lines
+      String actualData = '';
+      bool foundContent = false;
+
+      for (int i = 1; i < lines.length; i++) {
+        final line = lines[i].trim();
+
+        // Skip translation lines that start with 🌐
+        if (line.startsWith('🌐 Dịch:')) continue;
+
+        // Parse time and content line: [HH:MM:SS][Model: modelname]: content
+        final timeContentRegex = RegExp(
+          r'^\[(\d{2}:\d{2}:\d{2})\](?:\[Model:\s*(.*?)\])?\s*:\s*(.*)$',
+        );
+        final timeContentMatch = timeContentRegex.firstMatch(line);
+
+        if (timeContentMatch != null) {
+          actualData = timeContentMatch.group(3)?.trim() ?? '';
+          foundContent = true;
+          break;
         }
-        return false;
       }
 
-      final source = match.group(1)?.trim();
-      final language = match.group(2)?.trim();
-      final time = match.group(3)?.trim();
-      final model = match.group(4)?.trim(); // Có thể null
-      final data = match.group(5)?.trim();
-
-      if (data == null || data.isEmpty) {
+      if (!foundContent || actualData.isEmpty) {
         if (kDebugMode) {
-          print('Không tìm thấy data để xóa');
+          debugPrint('Could not extract actual data from: $fullText');
         }
         return false;
       }
 
       if (kDebugMode) {
-        print('Attempting to delete: source=$source, language=$language, data=$data, model=$model');
+        debugPrint(
+          'Attempting to delete: source=$source, language=$language, data=$actualData',
+        );
       }
 
-      // Try multiple queries to find the document
-      QuerySnapshot snapshot;
-      
-      // First try: exact match with all fields
-      if (model != null && model.isNotEmpty) {
-        snapshot = await FirebaseFirestore.instance
-            .collection("User_Information")
-            .doc(uid)
-            .collection("Content_History")
-            .where("text", isEqualTo: data)
-            .where("language", isEqualTo: language)
-            .where("source", isEqualTo: source)
-            .where("model", isEqualTo: model)
-            .limit(1)
-            .get();
-      } else {
-        // Try without model field
-        snapshot = await FirebaseFirestore.instance
-            .collection("User_Information")
-            .doc(uid)
-            .collection("Content_History")
-            .where("text", isEqualTo: data)
-            .where("language", isEqualTo: language)
-            .where("source", isEqualTo: source)
-            .limit(1)
-            .get();
+      final historyCollection = FirebaseFirestore.instance
+          .collection("User_Information")
+          .doc(uid)
+          .collection("Content_History");
+
+      QuerySnapshot snapshot =
+          await historyCollection
+              .where("text", isEqualTo: actualData)
+              .where("language", isEqualTo: language)
+              .where("source", isEqualTo: source)
+              .limit(1)
+              .get();
+
+      if (snapshot.docs.isEmpty) {
+        snapshot =
+            await historyCollection
+                .where("text", isEqualTo: actualData)
+                .where("language", isEqualTo: language)
+                .limit(1)
+                .get();
       }
 
       if (snapshot.docs.isEmpty) {
-        // Fallback: try with just text and language
-        snapshot = await FirebaseFirestore.instance
-            .collection("User_Information")
-            .doc(uid)
-            .collection("Content_History")
-            .where("text", isEqualTo: data)
-            .where("language", isEqualTo: language)
-            .limit(1)
-            .get();
-      }
-
-      if (snapshot.docs.isEmpty) {
-        // Last resort: try with just text
-        snapshot = await FirebaseFirestore.instance
-            .collection("User_Information")
-            .doc(uid)
-            .collection("Content_History")
-            .where("text", isEqualTo: data)
-            .limit(1)
-            .get();
+        snapshot =
+            await historyCollection
+                .where("text", isEqualTo: actualData)
+                .limit(1)
+                .get();
       }
 
       if (snapshot.docs.isNotEmpty) {
         await snapshot.docs.first.reference.delete();
         if (kDebugMode) {
-          print('Successfully deleted document');
+          debugPrint('Successfully deleted document');
         }
         return true;
       } else {
         if (kDebugMode) {
-          print('No matching document found in Firestore');
+          debugPrint('No matching document found in Firestore');
         }
         return false;
       }
     } catch (e) {
       if (kDebugMode) {
-        print('Error deleting note: $e');
+        debugPrint('Error deleting note: $e');
       }
       return false;
     }
   }
 
   void _handleDelete(BuildContext context, String fullText) async {
-    final noteToDelete = _noteEntries.firstWhere(
-      (note) => note.toString().trim() == fullText.trim(),
-      orElse: () => throw StateError('Note not found'),
-    );
-
-    final deleted = await _deleteNoteEntryByText(fullText);
-    
-    if (deleted) {
-      _storeRecentlyDeletedContent(noteToDelete);
-
-      setState(() {
-        _noteEntries.removeWhere(
-          (note) => note.toString().trim() == fullText.trim(),
+    try {
+      NoteEntry? noteToDelete;
+      for (final note in _noteEntries) {
+        if (note.toString().trim() == fullText.trim()) {
+          noteToDelete = note;
+          break;
+        }
+      }
+      if (noteToDelete == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Không tìm thấy ghi chú để xóa"),
+            backgroundColor: Colors.red,
+          ),
         );
-      });
+        Navigator.pop(context);
+        return;
+      }
+      final deleted = await _deleteNoteEntryByText(fullText);
+      if (deleted) {
+        _storeRecentlyDeletedContent(noteToDelete);
 
+        setState(() {
+          _noteEntries.removeWhere(
+            (note) => note.toString().trim() == fullText.trim(),
+          );
+        });
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Xóa thành công"),
+            backgroundColor: Colors.green,
+            duration: Duration(milliseconds: 2000),
+          ),
+        );
+      } else {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Không thể xóa ghi chú"),
+            backgroundColor: Colors.red,
+            duration: Duration(milliseconds: 2000),
+          ),
+        );
+      }
+    } catch (e) {
+      Navigator.of(context, rootNavigator: true).pop();
       Navigator.pop(context);
+
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Xóa thành công"))
+        SnackBar(content: Text("Lỗi khi xóa: $e"), backgroundColor: Colors.red),
       );
-    } else {
-      Navigator.pop(context);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Không thể xóa"),
-          backgroundColor: Colors.red,
-        )
-      );
+
+      if (kDebugMode) {
+        debugPrint('Error in _handleDelete: $e');
+      }
     }
   }
 
@@ -691,13 +981,11 @@ class NhanDienTabState extends State<NhanDienTab>
     final lines = text.trim().split('\n');
     List<TextSpan> spans = [];
 
-    final metaRegex = RegExp(r'^\[(.*?)\] - \[(.*?)\]$');
-    final timeRegex = RegExp(r'^\[(\d{2}:\d{2}:\d{2})\]:(.*)$');
-    final modelTimeRegex = RegExp(
-      r'^\[(\d{2}:\d{2}:\d{2})\]\s*\["?Model:\s*(.*?)"?\]\s*:(.*)$',
-    );
+    for (int i = 0; i < lines.length; i++) {
+      final line = lines[i].trim();
+      if (line.isEmpty) continue;
 
-    for (final line in lines) {
+      final metaRegex = RegExp(r'^\[(.*?)\] - \[(.*?)\]$');
       if (metaRegex.hasMatch(line)) {
         final match = metaRegex.firstMatch(line)!;
         final source = match.group(1)!;
@@ -712,24 +1000,32 @@ class NhanDienTabState extends State<NhanDienTab>
                 style: TextStyle(
                   fontWeight: FontWeight.bold,
                   color: sourceColor,
+                  fontSize: 14,
                 ),
               ),
               TextSpan(
-                text: '[$language]\n',
+                text: '[$language]',
                 style: const TextStyle(
                   fontWeight: FontWeight.bold,
                   color: Colors.deepPurple,
+                  fontSize: 14,
                 ),
               ),
             ],
           ),
         );
-      } else if (modelTimeRegex.hasMatch(line)) {
+        continue;
+      }
+      final modelTimeRegex = RegExp(
+        r'^\[(\d{2}:\d{2}:\d{2})\]\s*\[Model:\s*(.*?)\]\s*:\s*(.*)$',
+      );
+      if (modelTimeRegex.hasMatch(line)) {
         final match = modelTimeRegex.firstMatch(line)!;
         final time = match.group(1)!;
         final model = match.group(2)!;
         final content = match.group(3)!.trim();
 
+        spans.add(const TextSpan(text: '\n'));
         spans.add(
           TextSpan(
             children: [
@@ -738,59 +1034,229 @@ class NhanDienTabState extends State<NhanDienTab>
                 style: const TextStyle(
                   fontWeight: FontWeight.bold,
                   color: Colors.green,
+                  fontSize: 13,
                 ),
               ),
               TextSpan(
                 text: '[Model: $model] ',
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  color: Colors.orange,
-                ),
-              ),
-              TextSpan(
-                text: ': $content',
-                style: const TextStyle(color: Colors.black),
-              ),
-            ],
-          ),
-        );
-      } else if (timeRegex.hasMatch(line)) {
-        final match = timeRegex.firstMatch(line)!;
-        final time = match.group(1)!;
-        final content = match.group(2)!.trim();
-
-        spans.add(
-          TextSpan(
-            children: [
-              TextSpan(
-                text: '[$time]: ',
                 style: const TextStyle(
                   fontWeight: FontWeight.bold,
-                  color: Colors.green,
+                  color: Colors.orange,
+                  fontSize: 13,
+                ),
+              ),
+              const TextSpan(
+                text: ': ',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: Colors.black,
                 ),
               ),
               TextSpan(
                 text: content,
-                style: const TextStyle(color: Colors.black),
+                style: const TextStyle(color: Colors.black87, fontSize: 15),
               ),
             ],
           ),
         );
-      } else {
-        spans.add(
-          TextSpan(
-            text: '$line\n',
-            style: const TextStyle(color: Colors.black),
-          ),
-        );
+        continue;
       }
+
+      final translationRegex = RegExp(r'^🌐\s*Dịch sang\s*(.*?)\s*:\s*(.*)$');
+      final match = translationRegex.firstMatch(line);
+      if (match != null) {
+        final label = match.group(1)?.trim() ?? '';
+        final translatedText = match.group(2)?.trim() ?? '';
+        if (translatedText.isNotEmpty) {
+          spans.add(const TextSpan(text: '\n'));
+          spans.add(
+            TextSpan(
+              children: [
+                const TextSpan(
+                  text: '🌐 Dịch sang ',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black,
+                    fontSize: 14,
+                  ),
+                ),
+                TextSpan(
+                  text: '$label: ',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: Colors.deepPurple,
+                    fontSize: 14,
+                  ),
+                ),
+                TextSpan(
+                  text: translatedText,
+                  style: const TextStyle(
+                    color: Colors.black,
+                    fontSize: 14,
+                    fontWeight: FontWeight.normal,
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
+        continue;
+      }
+      spans.add(
+        TextSpan(
+          text: '\n$line',
+          style: const TextStyle(color: Colors.black54, fontSize: 14),
+        ),
+      );
     }
     return spans;
   }
 
+  void _showChatOptionsDialog(BuildContext context, String fullText) {
+    showDialog(
+      context: context,
+      builder:
+          (context) => AlertDialog(
+            title: const Text("Tùy chọn"),
+            content: ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 300),
+              child: SingleChildScrollView(
+                child: SelectableText.rich(
+                  TextSpan(
+                    style: const TextStyle(fontSize: 14, color: Colors.black),
+                    children: _buildStyledNoteTextSpans(fullText),
+                  ),
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text("Hủy"),
+              ),
+              TextButton(
+                onPressed: () {
+                  final cleanText = _extractCleanText(fullText);
+                  Clipboard.setData(ClipboardData(text: cleanText));
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text("Đã sao chép nội dung"),
+                      backgroundColor: Colors.green,
+                      duration: Duration(milliseconds: 2000),
+                    ),
+                  );
+                },
+                child: const Text("Sao chép"),
+              ),
+              TextButton(
+                onPressed: () => _handleDelete(context, fullText),
+                child: const Text("Xóa", style: TextStyle(color: Colors.red)),
+              ),
+            ],
+          ),
+    );
+  }
+
+  String _extractCleanText(String fullText) {
+    final lines = fullText.trim().split('\n');
+    final StringBuffer cleanText = StringBuffer();
+
+    for (final line in lines) {
+      final lineTrimmed = line.trim();
+      if (RegExp(r'^\[(.*?)\] - \[(.*?)\]$').hasMatch(lineTrimmed)) {
+        continue;
+      }
+      final timeContentRegex = RegExp(
+        r'^\[(\d{2}:\d{2}:\d{2})\](?:\s*\[Model:\s*(.*?)\])?\s*:\s*(.*)$',
+      );
+      final match = timeContentRegex.firstMatch(lineTrimmed);
+      if (match != null) {
+        final content = match.group(3)?.trim() ?? '';
+        if (content.isNotEmpty) {
+          if (cleanText.isNotEmpty) cleanText.write('\n\n');
+          cleanText.write(content);
+        }
+        continue;
+      }
+
+      if (lineTrimmed.startsWith('🌐 Dịch:')) {
+        final translatedText = lineTrimmed.substring(8).trim();
+        if (translatedText.isNotEmpty) {
+          cleanText.write('\n(Dịch: $translatedText)');
+        }
+        continue;
+      }
+    }
+
+    return cleanText.toString().trim();
+  }
+
+  Widget _buildLanguageDropdown() {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        boxShadow: const [
+          BoxShadow(color: Colors.black26, blurRadius: 4, offset: Offset(1, 2)),
+        ],
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.translate, color: Colors.blue, size: 20),
+          const SizedBox(width: 8),
+          const Text(
+            'Dịch sang: ',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w500,
+              color: Colors.black87,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: DropdownButton<String>(
+              value: _selectedTargetLanguage,
+              isExpanded: true,
+              underline: Container(),
+              icon: const Icon(Icons.arrow_drop_down, color: Colors.blue),
+              style: const TextStyle(
+                fontSize: 14,
+                color: Colors.black87,
+                fontWeight: FontWeight.bold,
+              ),
+              items:
+                  _availableLanguages.entries.map((entry) {
+                    return DropdownMenuItem<String>(
+                      value: entry.key,
+                      child: Text(
+                        entry.value,
+                        style: const TextStyle(fontSize: 14),
+                      ),
+                    );
+                  }).toList(),
+              onChanged: (String? newValue) async {
+                if (newValue != null && newValue != _selectedTargetLanguage) {
+                  setState(() {
+                    _selectedTargetLanguage = newValue;
+                    _translationCache.clear();
+                  });
+                  final prefs = await SharedPreferences.getInstance();
+                  await prefs.setString('selectedLanguage', newValue);
+                  _translateMissingEntries();
+                }
+              }
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildContentField(double width, double height) {
     final groupedNotes = _groupNotesByDate(_noteEntries);
-
     return Container(
       margin: const EdgeInsets.only(top: 3),
       padding: const EdgeInsets.all(10),
@@ -798,7 +1264,6 @@ class NhanDienTabState extends State<NhanDienTab>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Tiêu đề và nút xoá
           Row(
             children: [
               const Text(
@@ -847,10 +1312,9 @@ class NhanDienTabState extends State<NhanDienTab>
               ),
             ],
           ),
-          // Khung hiển thị nội dung
           SizedBox(
             width: width,
-            height: height * 0.65,
+            height: height * 0.56,
             child: Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
@@ -943,7 +1407,12 @@ class NhanDienTabState extends State<NhanDienTab>
         children: [
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: _buildContentField(width, height),
+            child: Column(
+              children: [
+                _buildLanguageDropdown(),
+                _buildContentField(width, height),
+              ],
+            ),
           ),
         ],
       ),

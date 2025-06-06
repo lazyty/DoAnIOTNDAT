@@ -160,7 +160,7 @@ class _GhiAmTabState extends State<GhiAmTab>
       throw 'Không thể tạo thư mục lưu file ghi âm.';
     }
     final now = DateTime.now();
-    final formattedTime = DateFormat('dd-MM-yyyy_HHmmss').format(now);
+    final formattedTime = DateFormat("dd-MM-yyyy_HH'h'mm'm'ss's'").format(now);
     final filePath = '${userDir.path}/audio_$formattedTime.wav';
     if (await record.isRecording()) {
       await record.stop();
@@ -328,7 +328,7 @@ class _GhiAmTabState extends State<GhiAmTab>
     try {
       var request = http.MultipartRequest(
         'POST',
-        Uri.parse('http://35.239.125.114:30090/detect-language/'),
+        Uri.parse('http://34.123.211.234:30090/detect-language/'),
       );
 
       request.headers.addAll({
